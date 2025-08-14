@@ -36,21 +36,34 @@ npm install
 ### Running the System
 
 ```bash
+# Quick setup with MCP integration
+./setup-mcp.sh /path/to/your/effect-ts-project/src
+
+# Or manual setup:
+# Set target directory and analyze
+ANALYSIS_TARGET_DIR="/path/to/your/project/src" npm run analyze
+
+# Start the API server with custom target
+ANALYSIS_TARGET_DIR="/path/to/your/project/src" npm run api
+
 # Start the visualization UI (http://localhost:3002)
 npm run dev
 
-# Start the API server (http://localhost:3004)  
-npm run api
-
-# Run both simultaneously
+# Run both API and UI simultaneously  
 npm run start:all
 ```
 
-### Analyze Your Codebase
+### Environment Configuration
 
 ```bash
-# Run AST analysis on your Effect TS project
-npm run analyze
+# Required: Set the directory to analyze
+export ANALYSIS_TARGET_DIR="/path/to/your/effect-ts-project/src"
+
+# Optional: Custom API server port
+export PORT=3004
+
+# Optional: Analysis cache duration in milliseconds
+export ANALYSIS_CACHE_MS=30000
 ```
 
 ## 🎯 Core Features
@@ -110,6 +123,37 @@ Multiple ways to find Effects:
 | `GET` | `/api/analyze?query=<name>` | Analyze specific Effect |
 | `POST` | `/api/analyze` | Advanced analysis with context |
 | `POST` | `/api/analyze/batch` | Batch analyze multiple Effects |
+
+### MCP Server for Claude Code
+
+Integrate directly with Claude Code using the Model Context Protocol:
+
+```bash
+# Quick setup
+./setup-mcp.sh /path/to/your/effect-ts-project/src
+
+# Add to Claude Code MCP configuration
+{
+  "mcpServers": {
+    "effect-railway-visualizer": {
+      "command": "tsx",
+      "args": ["mcp-server.ts"],
+      "cwd": "/path/to/effect-rop-mapper",
+      "env": {
+        "ANALYSIS_TARGET_DIR": "/path/to/your/effect-ts-project/src"
+      }
+    }
+  }
+}
+```
+
+**Available MCP Tools:**
+- `analyze_effect` - Quick Effect analysis by name/file/partial match
+- `list_effects` - Get all Effects in the target codebase  
+- `batch_analyze` - Analyze multiple Effects at once
+- `get_effect_dependencies` - Get upstream/downstream dependencies
+- `assess_modification_risk` - Risk assessment for Effect modifications
+- `start_api_server` - Start the analysis API server
 
 ### API Response Example
 

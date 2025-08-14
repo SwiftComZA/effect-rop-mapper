@@ -14,29 +14,57 @@
  * ```
  */
 
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import type { AnalysisResult, EffectNode } from './src/types/effect-node.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execAsync = promisify(exec);
 
 const app = express();
-const PORT = 3004;
+const PORT = process.env.PORT || 3004;
+
+// Configuration from environment variables
+const ANALYSIS_TARGET_DIR = process.env.ANALYSIS_TARGET_DIR || __dirname;
+const ANALYSIS_CACHE_MS = parseInt(process.env.ANALYSIS_CACHE_MS) || 30000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
+// Type definitions for API
+interface APIAnalysisResult {
+  foundEffect: EffectNode;
+  upstreamCount: number;
+  downstreamCount: number;
+  upstreamNodes: EffectNode[];
+  downstreamNodes: EffectNode[];
+  riskLevel: 'low' | 'medium' | 'high';
+  operation: string;
+  timestamp: string;
+  lastAnalysis?: string;
+}
+
+interface BatchAnalysisRequest {
+  queries: Array<string | { query: string; operation?: string }>;
+}
+
+interface AnalyzeRequest {
+  query: string;
+  operation?: string;
+  context?: string;
+  refresh?: 'auto' | 'force';
+}
+
 // Load sample data (in production, this would come from the actual analysis)
-let analysisData = null;
+let analysisData: AnalysisResult | null = null;
 let lastAnalysisTime = 0;
-const ANALYSIS_CACHE_MS = 30000; // Cache for 30 seconds
 
 async function refreshAnalysisData(force = false) {
   const now = Date.now();
@@ -45,10 +73,11 @@ async function refreshAnalysisData(force = false) {
     return analysisData;
   }
 
-  console.log('🔄 Refreshing codebase analysis...');
+  console.log(`🔄 Refreshing codebase analysis for: ${ANALYSIS_TARGET_DIR}`);
   try {
     // Run the AST analyzer to get fresh data
-    const { stdout, stderr } = await execAsync('npm run analyze', {
+    const analyzeCommand = `npx tsx src/crawler/ast-analyzer.ts "${ANALYSIS_TARGET_DIR}"`;
+    const { stdout, stderr } = await execAsync(analyzeCommand, {
       cwd: __dirname,
       timeout: 30000 // 30 second timeout
     });
@@ -70,10 +99,9 @@ async function refreshAnalysisData(force = false) {
     console.warn('⚠️ Failed to refresh analysis, using cached/sample data:', error.message);
   }
   
-  // Fallback to existing data or sample data
+  // If no data available, throw error
   if (!analysisData) {
-    analysisData = createSampleData();
-    console.log('📊 Using sample data as fallback');
+    throw new Error(`No analysis data available. Please run: ANALYSIS_TARGET_DIR="${ANALYSIS_TARGET_DIR}" npm run analyze`);
   }
   
   return analysisData;
@@ -88,186 +116,17 @@ function loadAnalysisData() {
       lastAnalysisTime = Date.now();
       console.log('✅ Loaded railway data from file');
     } else {
-      // Use sample data
-      analysisData = createSampleData();
-      console.log('📊 Using sample data');
+      console.warn(`⚠️ No analysis data found at ${dataPath}`);
+      console.warn(`Please run: ANALYSIS_TARGET_DIR="${ANALYSIS_TARGET_DIR}" npm run analyze`);
+      analysisData = null;
     }
   } catch (error) {
     console.error('❌ Failed to load data:', error);
-    analysisData = createSampleData();
+    analysisData = null;
   }
 }
 
-function createSampleData() {
-  return {
-    railway: {
-      nodes: [
-        {
-          id: 'node-1',
-          name: 'GET /journalists',
-          type: 'controller',
-          filePath: '/backend/src/routes/journalists.ts',
-          line: 31,
-          description: 'HTTP GET endpoint for fetching journalists',
-          effectSignature: {
-            success: '{ data: Journalist[], total: number, page: number, limit: number }',
-            error: ['ValidationError', 'DatabaseError'],
-            dependencies: ['LoggerService', 'JournalistsRepository']
-          }
-        },
-        {
-          id: 'node-2', 
-          name: 'POST /journalists',
-          type: 'controller',
-          filePath: '/backend/src/routes/journalists.ts',
-          line: 128,
-          description: 'HTTP POST endpoint for creating journalists',
-          effectSignature: {
-            success: 'Journalist',
-            error: ['ValidationError', 'DatabaseError'],
-            dependencies: ['LoggerService', 'JournalistsRepository', 'MediaHouseJournalistsRepository']
-          }
-        },
-        {
-          id: 'node-3',
-          name: 'LoggerService',
-          type: 'service',
-          filePath: '/backend/src/services/logger.ts',
-          line: 15,
-          description: 'Structured logging service using Effect Context.Tag',
-          effectSignature: {
-            success: 'void',
-            error: [],
-            dependencies: ['EnvConfig']
-          }
-        },
-        {
-          id: 'node-4',
-          name: 'JournalistsRepository',
-          type: 'repository',
-          filePath: '/backend/src/repositories/journalists.repository.ts',
-          line: 25,
-          description: 'CRUD operations for journalists with Effect patterns',
-          effectSignature: {
-            success: 'Journalist | Journalist[] | number',
-            error: ['DatabaseError', 'NotFoundError'],
-            dependencies: ['DatabaseService']
-          }
-        },
-        {
-          id: 'node-5',
-          name: 'DatabaseService',
-          type: 'service',
-          filePath: '/backend/src/services/database.ts',
-          line: 20,
-          description: 'PostgreSQL database service with transaction support',
-          effectSignature: {
-            success: 'QueryResult',
-            error: ['DatabaseError'],
-            dependencies: ['EnvConfig']
-          }
-        },
-        {
-          id: 'node-6',
-          name: 'handleRequest',
-          type: 'middleware',
-          filePath: '/backend/src/utils/handle-request.ts',
-          line: 102,
-          description: 'Effect request handler with error mapping',
-          effectSignature: {
-            success: 'void',
-            error: ['AppError'],
-            dependencies: ['Runtime']
-          }
-        },
-        {
-          id: 'node-7',
-          name: 'ValidationError',
-          type: 'error',
-          filePath: '/backend/src/errors/index.ts',
-          line: 45,
-          description: 'Validation error type with status code 400'
-        },
-        {
-          id: 'node-8',
-          name: 'DatabaseError',
-          type: 'error',
-          filePath: '/backend/src/errors/index.ts',
-          line: 65,
-          description: 'Database error type with status code 503'
-        }
-      ],
-      edges: [
-        {
-          id: 'edge-1',
-          source: 'node-1',
-          target: 'node-3',
-          type: 'dependency',
-          label: 'requires LoggerService'
-        },
-        {
-          id: 'edge-2',
-          source: 'node-1',
-          target: 'node-4',
-          type: 'dependency',
-          label: 'requires JournalistsRepository'
-        },
-        {
-          id: 'edge-3',
-          source: 'node-2',
-          target: 'node-3',
-          type: 'dependency',
-          label: 'requires LoggerService'
-        },
-        {
-          id: 'edge-4',
-          source: 'node-2',
-          target: 'node-4',
-          type: 'dependency',
-          label: 'requires JournalistsRepository'
-        },
-        {
-          id: 'edge-5',
-          source: 'node-4',
-          target: 'node-5',
-          type: 'dependency',
-          label: 'requires DatabaseService'
-        }
-      ],
-      layers: {
-        controllers: ['node-1', 'node-2'],
-        services: ['node-3', 'node-5'],
-        repositories: ['node-4'],
-        middleware: ['node-6'],
-        utilities: [],
-        workers: [],
-        errors: ['node-7', 'node-8']
-      },
-      entryPoints: ['node-1', 'node-2']
-    },
-    statistics: {
-      totalNodes: 8,
-      totalEdges: 5,
-      nodesPerType: {
-        controller: 2,
-        service: 2,
-        repository: 1,
-        middleware: 1,
-        utility: 0,
-        worker: 0,
-        error: 2
-      },
-      edgesPerType: {
-        success: 0,
-        error: 0,
-        dependency: 5,
-        pipe: 0
-      },
-      errorTypes: ['ValidationError', 'DatabaseError'],
-      dependencyTypes: ['LoggerService', 'JournalistsRepository', 'DatabaseService']
-    }
-  };
-}
+// Sample data removed - only real analysis data from target directory is used
 
 // Simple TargetedEffectCalculator implementation for API
 class APITargetedEffectCalculator {
@@ -414,12 +273,13 @@ let calculator = null;
 // API Routes
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
     dataLoaded: !!analysisData,
-    totalNodes: analysisData?.railway?.nodes?.length || 0
+    totalNodes: analysisData?.railway?.nodes?.length || 0,
+    targetDirectory: ANALYSIS_TARGET_DIR
   });
 });
 

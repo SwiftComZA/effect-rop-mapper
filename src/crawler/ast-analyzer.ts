@@ -733,10 +733,21 @@ export class EffectASTAnalyzer {
 // Command line execution - only run when in Node.js environment
 if (typeof process !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
   const analyzer = new EffectASTAnalyzer();
-  const backendPath = path.resolve('../backend/src');
+  
+  // Get target directory from command line argument or environment variable
+  const targetDir = process.argv[2] || process.env.ANALYSIS_TARGET_DIR || '../backend/src';
+  const backendPath = path.resolve(targetDir);
   
   console.log('🔍 Analyzing Effect TS patterns in codebase...');
-  console.log('📁 Backend path:', backendPath);
+  console.log('📁 Target directory:', backendPath);
+  
+  // Validate target directory exists
+  if (!fs.existsSync(backendPath)) {
+    console.error(`❌ Target directory does not exist: ${backendPath}`);
+    console.error('Usage: npx tsx src/crawler/ast-analyzer.ts [target-directory]');
+    console.error('   or: ANALYSIS_TARGET_DIR=/path/to/src npx tsx src/crawler/ast-analyzer.ts');
+    process.exit(1);
+  }
   
   analyzer.analyzePath(backendPath)
     .then((result) => {

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "effect-railway-visualizer": {
+      "command": "tsx",
+      "args": ["mcp-server.ts"],
+      "cwd": "/path/to/effect-rop-mapper",
+      "env": {
+        "ANALYSIS_TARGET_DIR": "/path/to/your/effect-ts-project/src",
+        "EFFECT_RAILWAY_API_URL": "http://localhost:3004/api"
+      }
+    }
+  }
+}
