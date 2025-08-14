@@ -1,0 +1,26 @@
+{
+  "name": "effect-railway-visualizer",
+  "version": "1.0.0",
+  "description": "Railway Oriented Programming visualizer for Effect TS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "analyze": "tsx src/crawler/ast-analyzer.ts",
+    "api": "node api-server.js",
+    "start:all": "concurrently \"npm run dev\" \"npm run api\""
+  },
+  "dependencies": {
+    "@types/d3": "^7.4.3",
+    "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "d3": "^7.9.0",
+    "express": "^4.21.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
