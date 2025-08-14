@@ -4,12 +4,14 @@
   "description": "Railway Oriented Programming visualizer for Effect TS",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"vite\" \"tsx api-server.ts\"",
+    "dev:ui": "vite",
+    "dev:api": "tsx api-server.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "analyze": "tsx src/crawler/ast-analyzer.ts",
     "api": "tsx api-server.ts",
-    "start:all": "concurrently \"npm run dev\" \"npm run api\""
+    "start:all": "concurrently \"npm run dev:ui\" \"npm run dev:api\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.5.0",
@@ -19,6 +21,7 @@
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "d3": "^7.9.0",
+    "dotenv": "^17.2.1",
     "express": "^4.21.2",
     "node-fetch": "^3.3.2",
     "tsx": "^4.19.2",

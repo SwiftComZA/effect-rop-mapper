@@ -16,6 +16,7 @@
 import * as ts from 'typescript';
 import * as fs from 'fs';
 import * as path from 'path';
+import dotenv from 'dotenv';
 import type { 
   EffectNode, 
   EffectEdge, 
@@ -732,6 +733,9 @@ export class EffectASTAnalyzer {
 
 // Command line execution - only run when in Node.js environment
 if (typeof process !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
+  // Load environment variables from .env file
+  dotenv.config();
+  
   const analyzer = new EffectASTAnalyzer();
   
   // Get target directory from command line argument or environment variable

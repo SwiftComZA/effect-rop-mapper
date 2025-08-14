@@ -21,7 +21,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import dotenv from 'dotenv';
 import type { AnalysisResult, EffectNode } from './src/types/effect-node.js';
+
+// Load environment variables from .env file
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
