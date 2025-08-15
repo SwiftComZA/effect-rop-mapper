@@ -23,7 +23,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import dotenv from 'dotenv';
 import type { AnalysisResult, EffectNode } from './src/types/effect-node.js';
-import { FunctionAnalyzer } from './src/analyzer/function-analyzer.js';
+import { analyzeFunctions } from './src/analyzer/function-analyzer-pure.js';
+import type { FunctionAnalysisResult } from './src/analyzer/function-analyzer-types.js';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -389,8 +390,7 @@ app.post('/api/analyze/functions', async (req, res) => {
     }
     
     console.log(`🔍 Starting function analysis for: ${resolvedDir}`);
-    const analyzer = new FunctionAnalyzer(resolvedDir);
-    const result = await analyzer.analyze();
+    const { result } = await analyzeFunctions(resolvedDir);
     
     res.json({
       success: true,
@@ -417,8 +417,7 @@ app.get('/api/analyze/functions', async (req, res) => {
     }
     
     console.log(`🔍 Starting function analysis for: ${resolvedDir}`);
-    const analyzer = new FunctionAnalyzer(resolvedDir);
-    const result = await analyzer.analyze();
+    const { result } = await analyzeFunctions(resolvedDir);
     
     res.json({
       success: true,

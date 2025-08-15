@@ -18,7 +18,7 @@ import { generateNodeAnalysis, generateSystemOverview } from './export/llm-tree-
 import { calculateNewEffect, generateSystemExtension } from './calculator/effect-calculator-pure.js';
 import { analyzeEffect, generateQuickReport } from './calculator/targeted-effect-calculator-pure.js';
 import type { AnalysisResult, EffectNode, EffectEdge, EdgeType } from './types/effect-node.js';
-import type { FunctionAnalysisResult, FunctionInfo, FunctionLocation } from './analyzer/function-analyzer.js';
+import type { FunctionAnalysisResult, FunctionInfo, FunctionLocation } from './analyzer/function-analyzer-types.js';
 import type { APIAnalysisResult } from './types/api-types.js';
 import type { WindowExtensions } from './types/window-extensions.js';
 

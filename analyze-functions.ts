@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from 'fs';
 import * as path from 'path';
-import { FunctionAnalyzer } from './src/analyzer/function-analyzer';
+import { analyzeFunctions } from './src/analyzer/function-analyzer-pure';
 
 /**
  * Purpose: Complete function AST analysis with full dependency mapping
@@ -29,8 +29,7 @@ async function main() {
   }
 
   // Run the analyzer
-  const analyzer = new FunctionAnalyzer(resolvedDir);
-  const output = await analyzer.analyze();
+  const { result: output } = await analyzeFunctions(resolvedDir);
 
   // Create output directory if it doesn't exist
   const scriptDir = path.dirname(new URL(import.meta.url).pathname);

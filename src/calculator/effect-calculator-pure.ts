@@ -235,7 +235,14 @@ const findBestCapabilityMatch = (nodes: EffectNode[], targetLayer: NodeType): Ef
     return serviceNodes[0];
   }
   
-  return nodes[0];
+  // Return first node or create a placeholder
+  return nodes[0] || {
+    id: 'placeholder',
+    name: 'placeholder',
+    type: 'service' as NodeType,
+    filePath: '',
+    line: 0
+  };
 };
 
 // Pure helper function to infer layer for capability

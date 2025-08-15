@@ -522,15 +522,12 @@ export const renderRailway = (
   const handlers: EventHandlers = {
     onNodeClick: (node: EffectNode) => {
       // Return action to handle node click
-      console.log('Node clicked:', node.id);
     },
     onNodeHover: (node: EffectNode | null) => {
       // Return action to handle node hover
-      console.log('Node hover:', node?.id);
     },
     onZoom: (scale: number, x: number, y: number) => {
       // Return new zoom state
-      console.log('Zoom:', scale, x, y);
     }
   };
   
