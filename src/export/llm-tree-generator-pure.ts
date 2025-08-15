@@ -91,7 +91,11 @@ const buildDependencyTree = (
     file: node.filePath,
     line: node.line,
     description: node.description || '',
-    effectSignature: node.effectSignature,
+    effectSignature: node.effectSignature || {
+      success: 'unknown',
+      error: [],
+      dependencies: []
+    },
     children,
     depth,
     relationshipType: depth === 0 ? 'root' : 'depends-on'
@@ -129,7 +133,11 @@ const buildImpactTree = (
     file: node.filePath,
     line: node.line,
     description: node.description || '',
-    effectSignature: node.effectSignature,
+    effectSignature: node.effectSignature || {
+      success: 'unknown',
+      error: [],
+      dependencies: []
+    },
     children,
     depth,
     relationshipType: depth === 0 ? 'root' : 'used-by'

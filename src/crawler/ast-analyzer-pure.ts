@@ -19,7 +19,6 @@ import type {
   EffectEdge, 
   EffectRailway, 
   NodeType, 
-  EdgeType, 
   EffectSignature,
   AnalysisResult,
   LayerMap
@@ -111,7 +110,7 @@ const visitNode = (
 const analyzeImport = (
   state: AnalysisState,
   node: ts.ImportDeclaration,
-  filePath: string
+  _filePath: string
 ): AnalysisState => {
   const moduleSpecifier = node.moduleSpecifier;
   
@@ -177,12 +176,11 @@ const analyzeEffectGen = (
     filePath,
     line,
     metrics: {
-      complexity: calculateComplexity(node),
-      dependencies: [],
       callsCount: 0,
-      calledByCount: 0
+      calledByCount: 0,
+      lines: 1
     },
-    effectSignature: signature
+    ...(signature && { effectSignature: signature })
   };
   
   const newNodes = new Map(state.nodes);
@@ -196,6 +194,7 @@ const analyzeEffectGen = (
     const depNode = findNodeByName(newNodes, dep);
     if (depNode) {
       newEdges.add({
+        id: `edge_${nodeId}_${depNode.id}`,
         source: nodeId,
         target: depNode.id,
         type: 'dependency'
@@ -231,10 +230,9 @@ const analyzePipe = (
     filePath,
     line,
     metrics: {
-      complexity: calculateComplexity(node),
-      dependencies: [],
       callsCount: 0,
-      calledByCount: 0
+      calledByCount: 0,
+      lines: 1
     }
   };
   
@@ -249,9 +247,10 @@ const analyzePipe = (
     const depNode = findNodeByName(newNodes, stage);
     if (depNode) {
       newEdges.add({
+        id: `edge_${nodeId}_${depNode.id}`,
         source: nodeId,
         target: depNode.id,
-        type: 'composition'
+        type: 'pipe'
       });
     }
   });
@@ -287,12 +286,11 @@ const analyzeDeclaration = (
       filePath,
       line,
       metrics: {
-        complexity: 1,
-        dependencies: [],
         callsCount: 0,
-        calledByCount: 0
+        calledByCount: 0,
+        lines: 1
       },
-      effectSignature: signature
+      ...(signature && { effectSignature: signature })
     };
     
     const newNodes = new Map(state.nodes);
@@ -338,12 +336,11 @@ const analyzeClassDeclaration = (
           filePath,
           line,
           metrics: {
-            complexity: calculateComplexity(member),
-            dependencies: [],
             callsCount: 0,
-            calledByCount: 0
+            calledByCount: 0,
+            lines: 1
           },
-          effectSignature: signature
+          ...(signature && { effectSignature: signature })
         };
         
         const newNodes = new Map(newState.nodes);
@@ -451,9 +448,9 @@ const extractEffectSignatureFromType = (typeNode: ts.TypeNode): EffectSignature 
     const args = typeNode.typeArguments;
     if (args.length >= 3) {
       return {
-        success: typeNodeToString(args[0]),
-        error: extractErrorTypes(args[1]),
-        requirements: extractRequirements(args[2])
+        success: args[0] ? typeNodeToString(args[0]) : 'unknown',
+        error: args[1] ? extractErrorTypes(args[1]) : [],
+        dependencies: args[2] ? extractRequirements(args[2]) : []
       };
     }
   }
@@ -498,25 +495,6 @@ const extractRequirements = (node: ts.TypeNode): string[] => {
   return requirements;
 };
 
-const calculateComplexity = (node: ts.Node): number => {
-  let complexity = 1;
-  
-  const visit = (n: ts.Node) => {
-    if (ts.isIfStatement(n) || ts.isConditionalExpression(n)) {
-      complexity++;
-    }
-    if (ts.isForStatement(n) || ts.isWhileStatement(n) || ts.isDoStatement(n)) {
-      complexity++;
-    }
-    if (ts.isSwitchStatement(n)) {
-      complexity += n.caseBlock.clauses.length;
-    }
-    ts.forEachChild(n, visit);
-  };
-  
-  visit(node);
-  return complexity;
-};
 
 const extractDependencies = (node: ts.CallExpression): string[] => {
   const deps: string[] = [];
@@ -531,7 +509,7 @@ const extractDependencies = (node: ts.CallExpression): string[] => {
     ts.forEachChild(n, visit);
   };
   
-  if (node.arguments.length > 0) {
+  if (node.arguments.length > 0 && node.arguments[0]) {
     visit(node.arguments[0]);
   }
   
@@ -607,27 +585,25 @@ const buildLayers = (nodes: EffectNode[]): LayerMap => {
 };
 
 // Pure function to calculate statistics
-const calculateStatistics = (railway: EffectRailway): Record<string, any> => {
-  const stats: Record<string, any> = {
+const calculateStatistics = (railway: EffectRailway) => {
+  const stats = {
     totalNodes: railway.nodes.length,
     totalEdges: railway.edges.length,
-    entryPoints: railway.entryPoints.length,
-    nodesPerType: {} as Record<NodeType, number>,
-    averageComplexity: 0,
-    maxComplexity: 0,
-    totalComplexity: 0
+    nodesPerType: {} as Record<string, number>,
+    edgesPerType: {} as Record<string, number>,
+    errorTypes: [] as string[],
+    dependencyTypes: [] as string[]
   };
   
   // Count nodes per type
   railway.nodes.forEach(node => {
     stats.nodesPerType[node.type] = (stats.nodesPerType[node.type] || 0) + 1;
-    stats.totalComplexity += node.metrics.complexity;
-    stats.maxComplexity = Math.max(stats.maxComplexity, node.metrics.complexity);
   });
   
-  stats.averageComplexity = railway.nodes.length > 0 
-    ? stats.totalComplexity / railway.nodes.length 
-    : 0;
+  // Count edges per type
+  railway.edges.forEach(edge => {
+    stats.edgesPerType[edge.type] = (stats.edgesPerType[edge.type] || 0) + 1;
+  });
   
   return stats;
 };

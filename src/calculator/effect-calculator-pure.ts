@@ -178,15 +178,17 @@ const calculateRequiredDependencies = (
     if (existingNodes.length > 0) {
       // Use existing capability
       const bestMatch = findBestCapabilityMatch(existingNodes, request.targetLayer);
-      dependencies.push({
-        name: bestMatch.name,
-        type: bestMatch.type,
-        reason: `Provides ${capability} capability`,
-        isExisting: true,
-        file: bestMatch.filePath,
-        line: bestMatch.line,
-        needsCreation: false
-      });
+      if (bestMatch) {
+        dependencies.push({
+          name: bestMatch.name,
+          type: bestMatch.type,
+          reason: `Provides ${capability} capability`,
+          isExisting: true,
+          file: bestMatch.filePath,
+          line: bestMatch.line,
+          needsCreation: false
+        });
+      }
     } else {
       // Need to create new dependency
       dependencies.push({
@@ -222,7 +224,7 @@ const calculateRequiredDependencies = (
 };
 
 // Pure helper function to find best capability match
-const findBestCapabilityMatch = (nodes: EffectNode[], targetLayer: NodeType): EffectNode => {
+const findBestCapabilityMatch = (nodes: EffectNode[], targetLayer: NodeType): EffectNode | undefined => {
   // Prefer nodes in the same layer
   const sameLayerNodes = nodes.filter(n => n.type === targetLayer);
   if (sameLayerNodes.length > 0) {
@@ -235,14 +237,7 @@ const findBestCapabilityMatch = (nodes: EffectNode[], targetLayer: NodeType): Ef
     return serviceNodes[0];
   }
   
-  // Return first node or create a placeholder
-  return nodes[0] || {
-    id: 'placeholder',
-    name: 'placeholder',
-    type: 'service' as NodeType,
-    filePath: '',
-    line: 0
-  };
+  return nodes[0];
 };
 
 // Pure helper function to infer layer for capability
@@ -275,7 +270,6 @@ const calculateErrorTypes = (
   request: EffectCalculationRequest,
   dependencies: CalculatedDependency[]
 ): CalculatedError[] => {
-  const errorTypes: CalculatedError[] = [];
   const errorMap = new Map<string, CalculatedError>();
 
   // Add requested error scenarios
@@ -409,7 +403,7 @@ const calculateUpstreamImpact = (
 // Pure function to calculate downstream impact
 const calculateDownstreamImpact = (
   request: EffectCalculationRequest,
-  dependencies: CalculatedDependency[],
+  _dependencies: CalculatedDependency[],
   context: CalculationContext
 ): ImpactAnalysis => {
   const affectedNodes: EffectNode[] = [];
@@ -420,7 +414,7 @@ const calculateDownstreamImpact = (
     if (node.type === 'controller' && request.targetLayer === 'service') {
       // Controllers might use new services
       const wouldUse = request.requiredCapabilities.some(cap => 
-        node.name.toLowerCase().includes(cap.split('-')[0])
+        node.name.toLowerCase().includes(cap.split('-')[0] || cap)
       );
       
       if (wouldUse) {

@@ -190,7 +190,7 @@ const visitNode = (
       name,
       file: relativePath,
       path: relativePath,
-      folder,
+      folder: folder || '',
       startLine: startPos.line + 1,
       endLine: endPos.line + 1,
       kind: ts.SyntaxKind[node.kind],
@@ -441,7 +441,7 @@ const buildDependencyTree = (functions: Map<string, FunctionInfo>): DependencyTr
 };
 
 // Pure function to get stats by folder
-const getStatsByFolder = (functions: Map<string, FunctionInfo>, rootDir: string): FolderStatsMap => {
+const getStatsByFolder = (functions: Map<string, FunctionInfo>): FolderStatsMap => {
   const stats: FolderStatsMap = {};
   
   for (const func of functions.values()) {
@@ -548,7 +548,7 @@ const getOutput = (state: AnalyzerState): FunctionAnalysisResult => {
     functions: detailedFunctions,
     byPath: buildNestedStructure(state.functions),
     dependencyTree: buildDependencyTree(state.functions),
-    folderStats: getStatsByFolder(state.functions, state.rootDir),
+    folderStats: getStatsByFolder(state.functions),
     topComplexFunctions: allFunctions
       .sort((a, b) => b.callsCount - a.callsCount)
       .slice(0, 30)

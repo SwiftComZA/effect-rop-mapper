@@ -127,7 +127,7 @@ const findEffect = (query: string, context: AnalysisContext): EffectNode | null 
   if (trimmedQuery.includes(':')) {
     const [file, line] = trimmedQuery.split(':');
     for (const node of context.nodes.values()) {
-      if (node.filePath.includes(file) && 
+      if (file && node.filePath.includes(file) && 
           (line === '*' || node.line.toString() === line)) {
         return node;
       }
@@ -328,7 +328,7 @@ const generateUsagePatterns = (node: EffectNode): UsagePattern[] => {
 // Pure function to assess risk
 const assessRisk = (
   node: EffectNode,
-  operation: string,
+  _operation: string,
   upstreamImpacts: ImpactSummary,
   downstreamImpacts: ImpactSummary
 ): RiskAssessment => {
@@ -430,7 +430,7 @@ export const analyzeEffect = (
   analysis: AnalysisResult,
   query: string,
   operation: string = 'analyze',
-  contextInfo?: string
+  _contextInfo?: string
 ): TargetedResult => {
   const context = buildAnalysisContext(analysis);
   

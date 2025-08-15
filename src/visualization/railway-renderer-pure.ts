@@ -189,11 +189,10 @@ const NODE_COLORS: Record<NodeType, string> = {
 };
 
 const EDGE_COLORS: Record<EdgeType, string> = {
+  success: '#10B981',
+  error: '#EF4444',
   dependency: '#94A3B8',
-  'error-handling': '#EF4444',
-  composition: '#3B82F6',
-  transformation: '#8B5CF6',
-  unknown: '#CBD5E1'
+  pipe: '#3B82F6'
 };
 
 const NODE_ICONS: Record<NodeType, string> = {
@@ -520,13 +519,13 @@ export const renderRailway = (
   
   // Define event handlers (pure functions that return new state)
   const handlers: EventHandlers = {
-    onNodeClick: (node: EffectNode) => {
+    onNodeClick: (_node: EffectNode) => {
       // Return action to handle node click
     },
-    onNodeHover: (node: EffectNode | null) => {
+    onNodeHover: (_node: EffectNode | null) => {
       // Return action to handle node hover
     },
-    onZoom: (scale: number, x: number, y: number) => {
+    onZoom: (_scale: number, _x: number, _y: number) => {
       // Return new zoom state
     }
   };

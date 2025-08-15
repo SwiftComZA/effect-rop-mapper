@@ -701,7 +701,8 @@ class EffectRailwayApp {
     // Make functions available globally for button clicks
     window.exportLLMAnalysis = (nodeId: string) => {
       try {
-        const analysis = generateNodeAnalysis(this.currentData!, nodeId);
+        if (!this.currentData) return;
+        const analysis = generateNodeAnalysis(this.currentData, nodeId);
         this.downloadText(`${analysis.rootNode.name}_llm_analysis.md`, analysis.fullDependencyTree);
         console.log('📊 LLM Analysis exported for:', analysis.rootNode.name);
       } catch (error) {
@@ -722,6 +723,7 @@ class EffectRailwayApp {
           integrateWithExisting: [nodeId]
         };
         
+        if (!this.currentData) return;
         const calculation = generateSystemExtension(this.currentData, exampleRequest);
         this.downloadText(`effect_extension_${exampleRequest.name}.md`, calculation);
         console.log('🧮 Effect extension generated for:', exampleRequest.name);
@@ -788,6 +790,7 @@ class EffectRailwayApp {
     // Legacy local functions (fallback)
     window.queryEffect = (query: string, operation: string = 'analyze', context?: string) => {
       try {
+        if (!this.currentData) return;
         const report = generateQuickReport(this.currentData, query, operation, context);
         console.log('🎯 Local Targeted Effect Analysis:');
         console.log(report);
@@ -802,6 +805,7 @@ class EffectRailwayApp {
     // Download targeted analysis
     window.downloadEffectAnalysis = (query: string, operation: string = 'analyze', context?: string) => {
       try {
+        if (!this.currentData) return;
         const report = generateQuickReport(this.currentData, query, operation, context);
         const filename = `effect_analysis_${query.replace(/[^a-zA-Z0-9]/g, '_')}.md`;
         this.downloadText(filename, report);
@@ -838,6 +842,7 @@ class EffectRailwayApp {
       
       this.currentData.railway.nodes.forEach((node, index) => {
         try {
+          if (!this.currentData) return;
           const analysis = generateNodeAnalysis(this.currentData, node.id);
           combinedAnalysis += `## ${index + 1}. ${analysis.rootNode.name}\n\n`;
           combinedAnalysis += analysis.fullDependencyTree;
@@ -904,6 +909,7 @@ class EffectRailwayApp {
         };
         
         try {
+          if (!this.currentData) return;
           const calculation = generateSystemExtension(this.currentData, exampleRequest);
           allCalculations += calculation;
           allCalculations += '\n---\n\n';

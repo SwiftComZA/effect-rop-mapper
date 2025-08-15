@@ -219,7 +219,7 @@ export class RailwayRendererBridge {
   private setupEventHandlers(handlers: EventHandlers): void {
     // Setup node interactions
     this.container.selectAll('.node')
-      .on('click', (event, d: any) => {
+      .on('click', (_event, d: any) => {
         if (handlers.onNodeClick && this.currentState) {
           const nodePos = this.currentState.nodes.find(n => 
             n.x === d.x && n.y === d.y
