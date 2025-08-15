@@ -16,11 +16,15 @@
 import type { EffectNode } from './effect-node.js';
 
 export interface APIAnalysisResult {
-  foundEffect?: EffectNode;
+  foundEffect: EffectNode;
+  upstreamCount: number;
+  downstreamCount: number;
   upstreamNodes: EffectNode[];
   downstreamNodes: EffectNode[];
   riskLevel: 'low' | 'medium' | 'high';
-  lastAnalysis: string;
+  operation: string;
+  timestamp: string;
+  lastAnalysis?: string;
   modificationGuide?: string[];
 }
 

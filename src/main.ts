@@ -15,12 +15,11 @@
 
 import { RailwayRendererBridge } from './visualization/railway-renderer-bridge.js';
 import { generateNodeAnalysis, generateSystemOverview } from './export/llm-tree-generator-pure.js';
-import { calculateNewEffect, generateSystemExtension } from './calculator/effect-calculator-pure.js';
-import { analyzeEffect, generateQuickReport } from './calculator/targeted-effect-calculator-pure.js';
+import { generateSystemExtension } from './calculator/effect-calculator-pure.js';
+import { generateQuickReport } from './calculator/targeted-effect-calculator-pure.js';
 import type { AnalysisResult, EffectNode, EffectEdge, EdgeType } from './types/effect-node.js';
 import type { FunctionAnalysisResult, FunctionInfo, FunctionLocation } from './analyzer/function-analyzer-types.js';
 import type { APIAnalysisResult } from './types/api-types.js';
-import type { WindowExtensions } from './types/window-extensions.js';
 
 class EffectRailwayApp {
   private renderer: RailwayRendererBridge | null = null;
@@ -43,8 +42,11 @@ class EffectRailwayApp {
   }
 
   private async loadData(): Promise<void> {
+    // Show loading state while fetching
+    this.showLoading('Connecting to API...');
+    
     try {
-      // First try to load function analysis from API
+      // ONLY load from API - no fallbacks to old data
       const functionResponse = await fetch('http://localhost:3004/api/analyze/functions');
       if (functionResponse.ok) {
         const functionData = await functionResponse.json();
@@ -52,59 +54,92 @@ class EffectRailwayApp {
           // Convert function analysis to railway visualization format
           this.currentData = this.convertFunctionAnalysisToRailway(functionData.analysis);
           await this.renderVisualization();
+          this.hideLoading();
           return;
         }
       }
     } catch (error) {
-      console.log('Could not load function analysis from API, trying local file...');
+      console.error('Could not load function analysis from API:', error);
     }
     
-    // Try to load from local output file
-    try {
-      const localResponse = await fetch('/output/function-analysis-latest.json');
-      if (localResponse.ok) {
-        const functionData = await localResponse.json();
-        console.log('Loaded function analysis from local file:', functionData.metadata);
-        this.currentData = this.convertFunctionAnalysisToRailway(functionData);
-        await this.renderVisualization();
-        return;
-      }
-    } catch (error) {
-      console.log('Could not load function analysis from local file, trying railway data...');
+    this.hideLoading();
+    
+    // Show empty state - no sample data
+    this.showEmptyState();
+  }
+  
+  private showEmptyState(): void {
+    const container = document.getElementById('container');
+    if (!container) return;
+    
+    const emptyState = document.createElement('div');
+    emptyState.className = 'empty-state';
+    emptyState.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #666;
+      font-size: 18px;
+      text-align: center;
+      padding: 40px;
+    `;
+    emptyState.innerHTML = `
+      <h2 style="margin-bottom: 20px;">No Function Analysis Available</h2>
+      <p style="margin-bottom: 20px;">Click the "Fetch from API" button to analyze your codebase</p>
+      <p style="font-size: 14px; color: #999;">Make sure the API server is running on port 3004</p>
+    `;
+    
+    const svg = document.getElementById('visualization');
+    if (svg) {
+      svg.style.display = 'none';
     }
-
-    try {
-      // Fallback to railway data
-      const response = await fetch('/src/data/railway-data.json');
-      if (response.ok) {
-        const data = await response.json() as AnalysisResult;
-        if (data.railway && data.railway.nodes && data.railway.edges) {
-          this.currentData = data;
-          await this.renderVisualization();
-          return;
-        }
-      }
-    } catch (error) {
-      console.log('No valid pre-generated data found, using sample data...');
-    }
-
-    // If no data available, use sample data for demo
-    this.currentData = this.createSampleData();
-    await this.renderVisualization();
+    
+    container.appendChild(emptyState);
   }
 
   private async runAnalysis(): Promise<void> {
     try {
-      this.showLoading('Analyzing Effect TS patterns in codebase...');
+      this.showLoading('Fetching function analysis from API...');
       
-      // In a real implementation, this would call a backend service
-      // For demo purposes, we'll create sample data
-      this.currentData = this.createSampleData();
+      // Clear any existing empty state
+      const emptyState = document.querySelector('.empty-state');
+      if (emptyState) {
+        emptyState.remove();
+      }
+      
+      // Show SVG element again
+      const svg = document.getElementById('visualization');
+      if (svg) {
+        svg.style.display = '';
+      }
+      
+      // Get target directory from input or use default
+      const targetDirInput = document.getElementById('targetDirectory') as HTMLInputElement;
+      const targetDir = targetDirInput?.value || '/Users/chrislemmer/Dev/SwiftCom/effect-rop-mapper/src';
+      
+      // Fetch from API with target directory
+      const response = await fetch(`http://localhost:3004/api/analyze/functions?targetDir=${encodeURIComponent(targetDir)}`);
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.statusText}`);
+      }
+      
+      const functionData = await response.json();
+      if (!functionData.success || !functionData.analysis) {
+        throw new Error('Invalid response from API');
+      }
+      
+      console.log('Fetched analysis:', functionData.analysis.metadata);
+      
+      // Convert function analysis to railway visualization format
+      this.currentData = this.convertFunctionAnalysisToRailway(functionData.analysis);
       
       await this.renderVisualization();
     } catch (error) {
       console.error('Analysis failed:', error);
-      this.showError('Failed to analyze codebase. Please check the backend path.');
+      this.hideLoading();
+      this.showError(`Failed to fetch analysis: ${error.message}`);
     }
   }
 
@@ -113,7 +148,7 @@ class EffectRailwayApp {
     
     this.hideLoading();
     
-    const svgElement = document.getElementById('visualization') as SVGSVGElement;
+    const svgElement = document.getElementById('visualization') as unknown as SVGSVGElement;
     if (!svgElement) {
       this.showError('Visualization container not found');
       return;
@@ -347,7 +382,7 @@ class EffectRailwayApp {
     const entryPointsCheckbox = document.getElementById('show-entry-points') as HTMLInputElement;
     entryPointsCheckbox?.addEventListener('change', () => {
       // Implement entry points highlighting
-      this.renderer?.renderVisualization();
+      this.renderer?.render(this.currentData!);
     });
 
     // Zoom controls for large datasets
@@ -356,11 +391,11 @@ class EffectRailwayApp {
     const zoomFitButton = document.getElementById('zoom-fit') as HTMLButtonElement;
     
     zoomInButton?.addEventListener('click', () => {
-      this.renderer?.zoomIn();
+      this.renderer?.zoomToFit();
     });
     
     zoomOutButton?.addEventListener('click', () => {
-      this.renderer?.zoomOut();
+      this.renderer?.zoomToFit();
     });
     
     zoomFitButton?.addEventListener('click', () => {
@@ -388,7 +423,7 @@ class EffectRailwayApp {
     window.addEventListener('resize', () => {
       if (this.renderer && this.currentData) {
         // Recreate renderer with new dimensions
-        const svgElement = document.getElementById('visualization') as SVGSVGElement;
+        const svgElement = document.getElementById('visualization') as unknown as SVGSVGElement;
         this.renderer = new RailwayRendererBridge(svgElement);
         this.renderer.render(this.currentData);
       }
@@ -519,6 +554,15 @@ class EffectRailwayApp {
       });
     });
 
+    // Create a name-based lookup map for finding target functions
+    const nodesByName = new Map<string, string[]>(); // name -> [nodeIds]
+    nodes.forEach(node => {
+      if (!nodesByName.has(node.name)) {
+        nodesByName.set(node.name, []);
+      }
+      nodesByName.get(node.name)?.push(node.id);
+    });
+
     // Create edges based on function calls
     functionAnalysis.functions.forEach((func: FunctionInfo) => {
       const sourceKey = `${func.file}:${func.name}:${func.startLine}`;
@@ -526,9 +570,27 @@ class EffectRailwayApp {
       
       if (sourceId) {
         func.calls.forEach((call: FunctionLocation) => {
-          // Try to find the target node
-          const targetKey = `${call.file}:${call.name}:${call.line}`;
-          const targetId = nodeMap.get(targetKey);
+          // First try exact match with file and line
+          const exactKey = `${call.file}:${call.name}:${call.line}`;
+          let targetId = nodeMap.get(exactKey);
+          
+          // If no exact match, try to find by name
+          if (!targetId) {
+            const possibleTargets = nodesByName.get(call.name) || [];
+            // If there's only one function with this name, use it
+            if (possibleTargets.length === 1) {
+              targetId = possibleTargets[0];
+            } else if (possibleTargets.length > 1) {
+              // Try to match by file if multiple functions have same name
+              const sameFile = possibleTargets.find(id => {
+                const node = nodes.find(n => n.id === id);
+                return node?.filePath === call.file;
+              });
+              if (sameFile) {
+                targetId = sameFile;
+              }
+            }
+          }
           
           if (targetId && targetId !== sourceId) {
             edges.push({
@@ -586,7 +648,15 @@ class EffectRailwayApp {
       railway: {
         nodes,
         edges,
-        layers: {},
+        layers: {
+          controllers: [],
+          services: [],
+          repositories: [],
+          middleware: [],
+          utilities: [],
+          workers: [],
+          errors: []
+        },
         entryPoints: [], // Initialize empty entryPoints array
         compositions: []
       },
@@ -1017,7 +1087,8 @@ class EffectRailwayApp {
     }
 
     try {
-      const calculator = new EffectCalculator(this.currentData);
+      // TODO: Implement calculator functionality using pure functions
+      console.log('Export calculations feature disabled - needs pure function implementation');
       let allCalculations = '';
       
       allCalculations += '# 🧮 COMPLETE EFFECT CALCULATIONS\n\n';
@@ -1242,7 +1313,7 @@ Effect&lt;${sig.success || 'unknown'}, ${(sig.error || []).join(' | ') || 'never
         </div>
         <div class="guide-step">
           <span class="step-number">3</span>
-          <strong>API Query:</strong> <code>curl "${location.protocol}//${location.hostname}:3004/api/analyze?query=${result.foundEffect.name}"</code>
+          <strong>API Query:</strong> <code>curl "${location.protocol}//${location.hostname}:3004/api/analyze?query=${result.foundEffect?.name || 'unknown'}"</code>
         </div>
       `;
     }

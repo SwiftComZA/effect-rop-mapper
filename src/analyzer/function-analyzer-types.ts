@@ -100,3 +100,33 @@ export interface TopComplexFunction {
 export interface NodeWithParameters extends ts.Node {
   parameters?: ts.NodeArray<ts.ParameterDeclaration>;
 }
+
+// Function location and info types (re-exported from function-analyzer-pure)
+export interface FunctionLocation {
+  name: string;
+  file: string;
+  line: number;
+}
+
+export interface FunctionInfo {
+  name: string;
+  file: string;
+  path: string;
+  folder: string;
+  startLine: number;
+  endLine: number;
+  kind: string;
+  parameters: string[];
+  calls: FunctionLocation[];
+  calledBy: FunctionLocation[];
+  callsCount: number;
+  calledByCount: number;
+}
+
+export interface FunctionAnalysisResult {
+  functions: FunctionInfo[];
+  byPath: NestedStructure;
+  dependencyTree: DependencyTree;
+  folderStats: FolderStatsMap;
+  topComplexFunctions: TopComplexFunction[];
+}

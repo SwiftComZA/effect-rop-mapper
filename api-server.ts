@@ -84,33 +84,59 @@ async function refreshAnalysisData(force = false) {
 
   console.log(`🔄 Refreshing codebase analysis for: ${ANALYSIS_TARGET_DIR}`);
   try {
-    // Run the AST analyzer to get fresh data
-    const analyzeCommand = `npx tsx src/crawler/ast-analyzer.ts "${ANALYSIS_TARGET_DIR}"`;
-    const { stdout, stderr } = await execAsync(analyzeCommand, {
-      cwd: __dirname,
-      timeout: 30000 // 30 second timeout
-    });
+    // Use the pure function analyzer directly instead of command line
+    console.log('🔍 Running function analysis with pure functions...');
+    const { result, logs } = await analyzeFunctions(ANALYSIS_TARGET_DIR);
     
-    if (stderr) {
-      console.warn('⚠️ Analysis warnings:', stderr);
+    // Log any warnings or info from the analyzer
+    if (logs.length > 0) {
+      console.log('📋 Analysis logs:', logs.join('\n'));
     }
     
-    // Try to load the newly generated data
-    const dataPath = path.join(__dirname, 'src/data/railway-data.json');
-    if (fs.existsSync(dataPath)) {
-      const newData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-      analysisData = newData;
-      lastAnalysisTime = now;
-      console.log(`✅ Refreshed analysis data: ${newData.railway?.nodes?.length || 0} nodes, ${newData.railway?.edges?.length || 0} edges`);
-      return analysisData;
-    }
+    // Convert function analysis to railway data format
+    // For now, return a basic structure - this can be enhanced later
+    const newData = {
+      railway: {
+        nodes: result.functions.map(func => ({
+          id: `${func.file}:${func.startLine}`,
+          name: func.name,
+          type: func.folder,
+          filePath: func.file,
+          line: func.startLine,
+          folder: func.folder,
+          description: `${func.kind} with ${func.parameters.length} parameters`
+        })),
+        edges: [],
+        layers: {
+          controllers: [],
+          services: [],
+          repositories: [],
+          middleware: [],
+          utilities: [],
+          workers: [],
+          errors: []
+        },
+        entryPoints: [],
+        compositions: []
+      },
+      statistics: {
+        totalNodes: result.functions.length,
+        totalEdges: 0,
+        nodesByFolder: result.folderStats
+      }
+    };
+    
+    analysisData = newData;
+    lastAnalysisTime = now;
+    console.log(`✅ Refreshed analysis data: ${newData.railway.nodes.length} nodes from function analysis`);
+    return analysisData;
   } catch (error) {
-    console.warn('⚠️ Failed to refresh analysis, using cached/sample data:', error.message);
+    console.warn('⚠️ Failed to refresh analysis using pure functions:', error.message);
   }
   
   // If no data available, throw error
   if (!analysisData) {
-    throw new Error(`No analysis data available. Please run: ANALYSIS_TARGET_DIR="${ANALYSIS_TARGET_DIR}" npm run analyze`);
+    throw new Error(`No analysis data available. Function analysis failed for: ${ANALYSIS_TARGET_DIR}`);
   }
   
   return analysisData;
@@ -149,6 +175,10 @@ class APITargetedEffectCalculator {
   }
 
   buildLookupMaps() {
+    if (!this.analysis || !this.analysis.railway) {
+      console.warn('⚠️ No analysis data available for building lookup maps');
+      return;
+    }
     this.analysis.railway.nodes.forEach(node => {
       this.nodes.set(node.id, node);
       
@@ -169,7 +199,8 @@ class APITargetedEffectCalculator {
     });
 
     // Build dependency graphs
-    this.analysis.railway.edges.forEach(edge => {
+    if (this.analysis && this.analysis.railway) {
+      this.analysis.railway.edges.forEach(edge => {
       if (!this.dependencyGraph.has(edge.target)) {
         this.dependencyGraph.set(edge.target, new Set());
       }
@@ -179,7 +210,8 @@ class APITargetedEffectCalculator {
         this.reverseGraph.set(edge.source, new Set());
       }
       this.reverseGraph.get(edge.source).add(edge.target);
-    });
+      });
+    }
   }
 
   findEffect(query) {
@@ -493,6 +525,10 @@ app.listen(PORT, () => {
   
   // Initialize data and calculator
   loadAnalysisData();
-  calculator = new APITargetedEffectCalculator(analysisData);
-  console.log('✅ API server ready!');
+  if (analysisData) {
+    calculator = new APITargetedEffectCalculator(analysisData);
+    console.log('✅ API server ready with analysis data!');
+  } else {
+    console.log('✅ API server ready (no railway analysis data available)');
+  }
 });
