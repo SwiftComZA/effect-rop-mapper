@@ -13,7 +13,7 @@
  * ```
  */
 
-import { RailwayRenderer } from './visualization/railway-renderer.js';
+import { RailwayRendererBridge } from './visualization/railway-renderer-bridge.js';
 import { generateNodeAnalysis, generateSystemOverview } from './export/llm-tree-generator-pure.js';
 import { calculateNewEffect, generateSystemExtension } from './calculator/effect-calculator-pure.js';
 import { analyzeEffect, generateQuickReport } from './calculator/targeted-effect-calculator-pure.js';
@@ -23,7 +23,7 @@ import type { APIAnalysisResult } from './types/api-types.js';
 import type { WindowExtensions } from './types/window-extensions.js';
 
 class EffectRailwayApp {
-  private renderer: RailwayRenderer | null = null;
+  private renderer: RailwayRendererBridge | null = null;
   private currentData: AnalysisResult | null = null;
 
   constructor() {
@@ -121,7 +121,7 @@ class EffectRailwayApp {
     
     svgElement.style.display = 'block';
     
-    this.renderer = new RailwayRenderer(svgElement);
+    this.renderer = new RailwayRendererBridge(svgElement);
     this.renderer.render(this.currentData);
     
     console.log('✅ Railway visualization rendered successfully!');
