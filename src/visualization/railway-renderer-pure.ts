@@ -205,7 +205,7 @@ const NODE_ICONS: Record<NodeType, string> = {
   error: '⚠️'
 };
 
-// Pure function to calculate node positions
+// Pure function to calculate node positions (vertical lanes by type)
 const calculateNodePositions = (
   nodes: EffectNode[],
   edges: Array<{ source: string; target: string; type: EdgeType }>,
@@ -213,64 +213,46 @@ const calculateNodePositions = (
   height: number,
   entryPoints: string[]
 ): NodePosition[] => {
-  // Build dependency graph
-  const dependencyMap = new Map<string, Set<string>>();
-  const reverseDependencyMap = new Map<string, Set<string>>();
+  // Define vertical lanes for each node type
+  const laneOrder: NodeType[] = ['controller', 'middleware', 'service', 'repository', 'worker', 'utility', 'error'];
+  const laneWidth = width / laneOrder.length;
   
-  edges.forEach(edge => {
-    if (!dependencyMap.has(edge.source)) {
-      dependencyMap.set(edge.source, new Set());
-    }
-    dependencyMap.get(edge.source)!.add(edge.target);
-    
-    if (!reverseDependencyMap.has(edge.target)) {
-      reverseDependencyMap.set(edge.target, new Set());
-    }
-    reverseDependencyMap.get(edge.target)!.add(edge.source);
-  });
+  // Group nodes by type
+  const nodesByType = new Map<NodeType, EffectNode[]>();
+  laneOrder.forEach(type => nodesByType.set(type, []));
   
-  // Calculate layers (topological sort)
-  const layers = new Map<string, number>();
-  const visited = new Set<string>();
-  const calculateLayer = (nodeId: string): number => {
-    if (layers.has(nodeId)) return layers.get(nodeId)!;
-    if (visited.has(nodeId)) return 0; // Cycle detected
-    
-    visited.add(nodeId);
-    const deps = reverseDependencyMap.get(nodeId) || new Set();
-    const maxDepLayer = deps.size === 0 ? -1 : 
-      Math.max(...Array.from(deps).map(dep => calculateLayer(dep)));
-    
-    const layer = maxDepLayer + 1;
-    layers.set(nodeId, layer);
-    return layer;
-  };
-  
-  nodes.forEach(node => calculateLayer(node.id));
-  
-  // Group nodes by layer
-  const layerGroups = new Map<number, EffectNode[]>();
   nodes.forEach(node => {
-    const layer = layers.get(node.id) || 0;
-    if (!layerGroups.has(layer)) {
-      layerGroups.set(layer, []);
-    }
-    layerGroups.get(layer)!.push(node);
+    const typeNodes = nodesByType.get(node.type) || [];
+    typeNodes.push(node);
+    nodesByType.set(node.type, typeNodes);
   });
   
   // Calculate positions
   const positions: NodePosition[] = [];
-  const layerCount = Math.max(...Array.from(layerGroups.keys())) + 1;
-  const layerHeight = height / (layerCount + 1);
   
-  layerGroups.forEach((layerNodes, layer) => {
-    const columnWidth = width / (layerNodes.length + 1);
-    layerNodes.forEach((node, index) => {
+  laneOrder.forEach((type, laneIndex) => {
+    const nodesInLane = nodesByType.get(type) || [];
+    const laneX = (laneIndex + 0.5) * laneWidth;
+    
+    // Sort nodes in lane by their dependencies (entry points first)
+    nodesInLane.sort((a, b) => {
+      const aIsEntry = entryPoints.includes(a.id);
+      const bIsEntry = entryPoints.includes(b.id);
+      if (aIsEntry && !bIsEntry) return -1;
+      if (!aIsEntry && bIsEntry) return 1;
+      return 0;
+    });
+    
+    // Position nodes vertically within their lane
+    const nodeSpacing = Math.min(80, height / (nodesInLane.length + 1));
+    const startY = (height - (nodesInLane.length - 1) * nodeSpacing) / 2;
+    
+    nodesInLane.forEach((node, index) => {
       positions.push({
         node,
-        x: columnWidth * (index + 1),
-        y: layerHeight * (layer + 1),
-        layer,
+        x: laneX,
+        y: startY + index * nodeSpacing,
+        layer: laneIndex,
         column: index,
         isEntryPoint: entryPoints.includes(node.id),
         radius: getNodeRadius(node.type),
