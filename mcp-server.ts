@@ -201,6 +201,25 @@ class EffectRailwayMCPServer {
             },
           },
           {
+            name: 'analyze_functions',
+            description: 'Analyze all TypeScript functions in a directory to understand dependencies, complexity, and architecture patterns. Returns detailed function analysis with call graphs.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                targetDir: {
+                  type: 'string',
+                  description: 'Directory path to analyze (absolute or relative)',
+                },
+                includeDetails: {
+                  type: 'boolean',
+                  default: false,
+                  description: 'Include full function details in response',
+                },
+              },
+              required: ['targetDir'],
+            },
+          },
+          {
             name: 'start_api_server',
             description: 'Start the Effect Railway API server if not running. Useful for ensuring the analysis service is available.',
             inputSchema: {
@@ -237,6 +256,8 @@ class EffectRailwayMCPServer {
             return await this.getEffectDependencies(args as any);
           case 'assess_modification_risk':
             return await this.assessModificationRisk(args as any);
+          case 'analyze_functions':
+            return await this.analyzeFunctions(args as any);
           case 'start_api_server':
             return await this.startApiServer(args as any);
           default:
@@ -477,6 +498,96 @@ class EffectRailwayMCPServer {
     return {
       content: [{ type: 'text', text: originalText + '\n' + additionalGuidance.join('\n') }],
     };
+  }
+
+  private async analyzeFunctions(args: { targetDir: string; includeDetails?: boolean }) {
+    const { targetDir, includeDetails = false } = args;
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/analyze/functions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetDir }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const analysis = data.analysis;
+
+      const output = [
+        `# 📊 Function Analysis: ${targetDir}`,
+        '',
+        `**Analyzed at:** ${analysis.metadata.analyzedAt}`,
+        `**Total Functions:** ${analysis.summary.totalFunctions}`,
+        `**Total Folders:** ${analysis.metadata.totalFolders}`,
+        `**Average Dependencies:** ${analysis.metadata.avgDependencies}`,
+        '',
+        '## 📈 Complexity Distribution',
+        `- **Zero Dependencies:** ${analysis.summary.zeroDependencies} functions`,
+        `- **Low (1-3 deps):** ${analysis.summary.lowComplexity} functions`,
+        `- **Medium (4-9 deps):** ${analysis.summary.mediumComplexity} functions`,
+        `- **High (10-19 deps):** ${analysis.summary.highComplexity} functions`,
+        `- **Very High (20+ deps):** ${analysis.summary.veryHighComplexity} functions`,
+        '',
+        '## 📁 Folder Statistics',
+      ];
+
+      // Add folder statistics
+      if (analysis.folderStats) {
+        const folders = Object.entries(analysis.folderStats)
+          .sort((a: any, b: any) => b[1].totalFunctions - a[1].totalFunctions)
+          .slice(0, 10);
+
+        folders.forEach(([folder, stats]: [string, any]) => {
+          output.push(
+            `### ${folder}`,
+            `- Functions: ${stats.totalFunctions}`,
+            `- Avg Dependencies: ${stats.avgDependencies}`,
+            `- Max Dependencies: ${stats.maxDependencies}`,
+            `- High Complexity: ${stats.highComplexityFunctions.length}`,
+            ''
+          );
+        });
+      }
+
+      // Add top complex functions
+      if (analysis.topComplexFunctions && analysis.topComplexFunctions.length > 0) {
+        output.push('## 🔥 Top Complex Functions');
+        analysis.topComplexFunctions.slice(0, 10).forEach((func: any, index: number) => {
+          output.push(
+            `${index + 1}. **${func.name}** (${func.file}:${func.lines})`,
+            `   - Dependencies: ${func.callsCount}`,
+            `   - Called by: ${func.calledByCount} functions`,
+            ''
+          );
+        });
+      }
+
+      // Include detailed function list if requested
+      if (includeDetails && analysis.functions) {
+        output.push('## 📝 All Functions (Top 50 by complexity)');
+        analysis.functions
+          .sort((a: any, b: any) => b.callsCount - a.callsCount)
+          .slice(0, 50)
+          .forEach((func: any) => {
+            output.push(
+              `- **${func.name}** (${func.file}:${func.startLine}-${func.endLine})`,
+              `  Calls: ${func.callsCount} | Called by: ${func.calledByCount}`,
+              ''
+            );
+          });
+      }
+
+      return {
+        content: [{ type: 'text', text: output.join('\n') }],
+      };
+    } catch (error) {
+      throw new Error(`Failed to analyze functions: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async startApiServer(args: { target_directory?: string; port?: number }) {

@@ -23,6 +23,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import dotenv from 'dotenv';
 import type { AnalysisResult, EffectNode } from './src/types/effect-node.js';
+import { FunctionAnalyzer } from './src/analyzer/function-analyzer.js';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -369,6 +370,67 @@ app.post('/api/analyze', async (req, res) => {
   }
 });
 
+// Analyze functions in a directory
+app.post('/api/analyze/functions', async (req, res) => {
+  try {
+    const { targetDir } = req.body;
+    
+    if (!targetDir) {
+      return res.status(400).json({ error: 'targetDir field is required' });
+    }
+    
+    const resolvedDir = path.resolve(targetDir);
+    
+    if (!fs.existsSync(resolvedDir)) {
+      return res.status(400).json({ error: `Directory does not exist: ${resolvedDir}` });
+    }
+    
+    console.log(`🔍 Starting function analysis for: ${resolvedDir}`);
+    const analyzer = new FunctionAnalyzer(resolvedDir);
+    const result = await analyzer.analyze();
+    
+    res.json({
+      success: true,
+      analysis: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Function analysis error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to analyze functions in the specified directory'
+    });
+  }
+});
+
+// Get function analysis for current target directory
+app.get('/api/analyze/functions', async (req, res) => {
+  try {
+    const targetDir = req.query.targetDir || ANALYSIS_TARGET_DIR;
+    const resolvedDir = path.resolve(targetDir);
+    
+    if (!fs.existsSync(resolvedDir)) {
+      return res.status(400).json({ error: `Directory does not exist: ${resolvedDir}` });
+    }
+    
+    console.log(`🔍 Starting function analysis for: ${resolvedDir}`);
+    const analyzer = new FunctionAnalyzer(resolvedDir);
+    const result = await analyzer.analyze();
+    
+    res.json({
+      success: true,
+      analysis: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Function analysis error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to analyze functions in the specified directory'
+    });
+  }
+});
+
 // Batch analyze multiple effects
 app.post('/api/analyze/batch', (req, res) => {
   try {
@@ -419,6 +481,8 @@ app.listen(PORT, () => {
   console.log('  GET  /api/analyze?query=<name> - Analyze effect (GET)');
   console.log('  POST /api/analyze        - Analyze effect (POST)');
   console.log('  POST /api/analyze/batch  - Batch analyze effects');
+  console.log('  GET  /api/analyze/functions - Analyze functions in target directory');
+  console.log('  POST /api/analyze/functions - Analyze functions with custom directory');
   console.log('');
   console.log('🎯 Example queries:');
   console.log('  curl "http://localhost:3004/api/analyze?query=LoggerService"');
