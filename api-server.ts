@@ -43,6 +43,9 @@ const ANALYSIS_CACHE_MS = parseInt(process.env.ANALYSIS_CACHE_MS) || 30000;
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from output folder
+app.use('/output', express.static(path.join(__dirname, 'output')));
+
 // Type definitions for API
 interface APIAnalysisResult {
   foundEffect: EffectNode;

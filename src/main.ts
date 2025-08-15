@@ -14,10 +14,13 @@
  */
 
 import { RailwayRenderer } from './visualization/railway-renderer.js';
-import { LLMTreeGenerator } from './export/llm-tree-generator.js';
-import { EffectCalculator } from './calculator/effect-calculator.js';
-import { TargetedEffectCalculator } from './calculator/targeted-effect-calculator.js';
-import type { AnalysisResult } from './types/effect-node.js';
+import { generateNodeAnalysis, generateSystemOverview } from './export/llm-tree-generator-pure.js';
+import { calculateNewEffect, generateSystemExtension } from './calculator/effect-calculator-pure.js';
+import { analyzeEffect, generateQuickReport } from './calculator/targeted-effect-calculator-pure.js';
+import type { AnalysisResult, EffectNode, EffectEdge, EdgeType } from './types/effect-node.js';
+import type { FunctionAnalysisResult, FunctionInfo, FunctionLocation } from './analyzer/function-analyzer.js';
+import type { APIAnalysisResult } from './types/api-types.js';
+import type { WindowExtensions } from './types/window-extensions.js';
 
 class EffectRailwayApp {
   private renderer: RailwayRenderer | null = null;
@@ -41,11 +44,40 @@ class EffectRailwayApp {
 
   private async loadData(): Promise<void> {
     try {
-      // Try to load pre-generated data first
+      // First try to load function analysis from API
+      const functionResponse = await fetch('http://localhost:3004/api/analyze/functions');
+      if (functionResponse.ok) {
+        const functionData = await functionResponse.json();
+        if (functionData.success && functionData.analysis) {
+          // Convert function analysis to railway visualization format
+          this.currentData = this.convertFunctionAnalysisToRailway(functionData.analysis);
+          await this.renderVisualization();
+          return;
+        }
+      }
+    } catch (error) {
+      console.log('Could not load function analysis from API, trying local file...');
+    }
+    
+    // Try to load from local output file
+    try {
+      const localResponse = await fetch('/output/function-analysis-latest.json');
+      if (localResponse.ok) {
+        const functionData = await localResponse.json();
+        console.log('Loaded function analysis from local file:', functionData.metadata);
+        this.currentData = this.convertFunctionAnalysisToRailway(functionData);
+        await this.renderVisualization();
+        return;
+      }
+    } catch (error) {
+      console.log('Could not load function analysis from local file, trying railway data...');
+    }
+
+    try {
+      // Fallback to railway data
       const response = await fetch('/src/data/railway-data.json');
       if (response.ok) {
         const data = await response.json() as AnalysisResult;
-        // Validate data structure
         if (data.railway && data.railway.nodes && data.railway.edges) {
           this.currentData = data;
           await this.renderVisualization();
@@ -56,7 +88,7 @@ class EffectRailwayApp {
       console.log('No valid pre-generated data found, using sample data...');
     }
 
-    // If no pre-generated data, use sample data for demo
+    // If no data available, use sample data for demo
     this.currentData = this.createSampleData();
     await this.renderVisualization();
   }
@@ -94,9 +126,77 @@ class EffectRailwayApp {
     
     console.log('✅ Railway visualization rendered successfully!');
     console.log('📊 Statistics:', this.currentData.statistics);
+    
+    // Update filter options based on actual data
+    this.updateFilterOptions();
+  }
+  
+  private updateFilterOptions(): void {
+    if (!this.currentData) return;
+    
+    const filterSelect = document.getElementById('filter-select') as HTMLSelectElement;
+    if (!filterSelect) return;
+    
+    // Clear existing options
+    filterSelect.innerHTML = '<option value="all">All Types</option>';
+    
+    // Add options for each folder type found in the data
+    const types = Object.keys(this.currentData.statistics.nodesPerType || {}).sort();
+    types.forEach(type => {
+      const count = this.currentData!.statistics.nodesPerType[type];
+      const option = document.createElement('option');
+      option.value = type;
+      option.textContent = `${this.formatTypeName(type)} (${count})`;
+      filterSelect.appendChild(option);
+    });
+  }
+  
+  private formatTypeName(type: string): string {
+    return type.charAt(0).toUpperCase() + type.slice(1).replace(/[-_]/g, ' ');
   }
 
   private setupEventListeners(): void {
+    // Analyze button
+    const analyzeButton = document.getElementById('analyze-button') as HTMLButtonElement;
+    const targetDirectory = document.getElementById('target-directory') as HTMLInputElement;
+    const analysisStatus = document.getElementById('analysis-status') as HTMLDivElement;
+    
+    analyzeButton?.addEventListener('click', async () => {
+      const path = targetDirectory.value.trim();
+      if (!path) {
+        analysisStatus.textContent = '❌ Please enter a directory path';
+        return;
+      }
+      
+      analysisStatus.textContent = '🔄 Analyzing...';
+      analyzeButton.disabled = true;
+      
+      try {
+        const response = await fetch(`http://localhost:3004/api/analyze/functions?targetDir=${encodeURIComponent(path)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.analysis) {
+            analysisStatus.textContent = `✅ Analyzed ${data.analysis.metadata.totalFunctions} functions in ${data.analysis.metadata.totalFolders} folders`;
+            this.currentData = this.convertFunctionAnalysisToRailway(data.analysis);
+            await this.renderVisualization();
+            this.updateFilterOptions();
+            // Zoom to fit new content
+            setTimeout(() => {
+              this.renderer?.zoomToFit();
+            }, 200);
+          } else {
+            analysisStatus.textContent = '❌ Analysis failed';
+          }
+        } else {
+          analysisStatus.textContent = '❌ API request failed';
+        }
+      } catch (error) {
+        analysisStatus.textContent = `❌ Error: ${error}`;
+      } finally {
+        analyzeButton.disabled = false;
+      }
+    });
+    
     // Filter selection
     const filterSelect = document.getElementById('filter-select') as HTMLSelectElement;
     filterSelect?.addEventListener('change', (event) => {
@@ -138,7 +238,7 @@ class EffectRailwayApp {
     });
 
     exportSystemOverviewButton?.addEventListener('click', () => {
-      (window as any).exportSystemOverview();
+      window.exportSystemOverview();
     });
 
     exportAllCalculationsButton?.addEventListener('click', () => {
@@ -198,6 +298,155 @@ class EffectRailwayApp {
       `;
       container.appendChild(errorDiv);
     }
+  }
+
+  private convertFunctionAnalysisToRailway(functionAnalysis: FunctionAnalysisResult): AnalysisResult {
+    const nodes: EffectNode[] = [];
+    const edges: EffectEdge[] = [];
+    const nodeMap = new Map<string, string>(); // functionKey -> nodeId
+    let nodeCounter = 0;
+
+    // Convert functions to nodes, grouped by actual folder structure
+    const functionsByFolder = new Map<string, FunctionInfo[]>();
+    
+    // Group functions by their actual folder
+    functionAnalysis.functions.forEach((func: FunctionInfo) => {
+      // Extract folder from file path if folder field is missing or generic
+      let folder = func.folder;
+      if (!folder || folder === '.' || folder === 'root' || folder === '') {
+        // Use the first directory from the file path
+        const fileParts = func.file.split('/');
+        if (fileParts.length > 1) {
+          folder = fileParts[0];
+        } else {
+          folder = 'root';
+        }
+      }
+      
+      if (!functionsByFolder.has(folder)) {
+        functionsByFolder.set(folder, []);
+      }
+      const folderArray = functionsByFolder.get(folder);
+      if (folderArray) {
+        folderArray.push(func);
+      }
+    });
+
+    // Sort folders by average complexity (folders with simpler functions first)
+    const sortedFolders = Array.from(functionsByFolder.entries()).sort((a, b) => {
+      const avgA = a[1].reduce((sum, f) => sum + f.callsCount, 0) / a[1].length;
+      const avgB = b[1].reduce((sum, f) => sum + f.callsCount, 0) / b[1].length;
+      return avgA - avgB;
+    });
+
+    // Create nodes for each function, ordered by complexity within each folder
+    sortedFolders.forEach(([folder, funcs]) => {
+      // Sort functions within folder by dependency count (least to most)
+      funcs.sort((a, b) => a.callsCount - b.callsCount);
+      
+      funcs.forEach(func => {
+        const nodeId = `node-${++nodeCounter}`;
+        const functionKey = `${func.file}:${func.name}:${func.startLine}`;
+        nodeMap.set(functionKey, nodeId);
+        
+        // Use the folder as the type directly
+        const folderType = folder;
+        
+        nodes.push({
+          id: nodeId,
+          name: func.name,
+          type: folderType, // Use actual folder name as type
+          filePath: func.file,
+          line: func.startLine,
+          description: `${func.kind} with ${func.callsCount} dependencies`,
+          folder: folder,
+          effectSignature: {
+            success: 'unknown',
+            error: [],
+            dependencies: func.calls.slice(0, 5).map((c: FunctionLocation) => c.name)
+          },
+          metrics: {
+            callsCount: func.callsCount,
+            calledByCount: func.calledByCount,
+            lines: func.endLine - func.startLine + 1
+          }
+        });
+      });
+    });
+
+    // Create edges based on function calls
+    functionAnalysis.functions.forEach((func: FunctionInfo) => {
+      const sourceKey = `${func.file}:${func.name}:${func.startLine}`;
+      const sourceId = nodeMap.get(sourceKey);
+      
+      if (sourceId) {
+        func.calls.forEach((call: FunctionLocation) => {
+          // Try to find the target node
+          const targetKey = `${call.file}:${call.name}:${call.line}`;
+          const targetId = nodeMap.get(targetKey);
+          
+          if (targetId && targetId !== sourceId) {
+            edges.push({
+              id: `edge-${sourceId}-${targetId}`,
+              source: sourceId,
+              target: targetId,
+              type: 'dependency' as EdgeType
+            });
+          }
+        });
+      }
+    });
+
+    // Calculate statistics - group by actual folders
+    const nodesByFolder: Record<string, number> = {};
+    const nodesByType: Record<string, number> = {};
+    
+    nodes.forEach(node => {
+      // Count by full folder path
+      const folder = node.folder || 'root';
+      nodesByFolder[folder] = (nodesByFolder[folder] || 0) + 1;
+      
+      // Count by folder type (last part of path)
+      nodesByType[node.type] = (nodesByType[node.type] || 0) + 1;
+    });
+
+    // Calculate edge statistics
+    const edgesPerType: Record<string, number> = {
+      success: 0,
+      error: 0,
+      dependency: edges.length, // All edges are dependencies in function analysis
+      pipe: 0
+    };
+    
+    const statistics = {
+      totalNodes: nodes.length,
+      totalEdges: edges.length,
+      nodesPerType: nodesByType, // This now shows actual folder names
+      nodesByFolder: nodesByFolder, // Full folder paths
+      edgesPerType: edgesPerType,
+      errorTypes: [],
+      dependencyTypes: [],
+      complexity: {
+        zero: functionAnalysis.summary.zeroDependencies,
+        low: functionAnalysis.summary.lowComplexity,
+        medium: functionAnalysis.summary.mediumComplexity,
+        high: functionAnalysis.summary.highComplexity,
+        veryHigh: functionAnalysis.summary.veryHighComplexity
+      },
+      avgDependencies: functionAnalysis.metadata.avgDependencies,
+      totalFolders: Object.keys(nodesByFolder).length
+    };
+
+    return {
+      railway: {
+        nodes,
+        edges,
+        layers: {},
+        entryPoints: [], // Initialize empty entryPoints array
+        compositions: []
+      },
+      statistics
+    };
   }
 
   private createSampleData(): AnalysisResult {
@@ -443,7 +692,6 @@ class EffectRailwayApp {
   private setupExportFunctions(): void {
     if (!this.currentData) return;
 
-    const treeGenerator = new LLMTreeGenerator(this.currentData);
     const calculator = new EffectCalculator(this.currentData);
     const targetedCalculator = new TargetedEffectCalculator(this.currentData);
 
@@ -451,9 +699,9 @@ class EffectRailwayApp {
     const API_BASE_URL = 'http://localhost:3004/api';
 
     // Make functions available globally for button clicks
-    (window as any).exportLLMAnalysis = (nodeId: string) => {
+    window.exportLLMAnalysis = (nodeId: string) => {
       try {
-        const analysis = treeGenerator.generateNodeAnalysis(nodeId);
+        const analysis = generateNodeAnalysis(this.currentData!, nodeId);
         this.downloadText(`${analysis.rootNode.name}_llm_analysis.md`, analysis.fullDependencyTree);
         console.log('📊 LLM Analysis exported for:', analysis.rootNode.name);
       } catch (error) {
@@ -462,7 +710,7 @@ class EffectRailwayApp {
       }
     };
 
-    (window as any).generateEffectExtension = (nodeId: string) => {
+    window.generateEffectExtension = (nodeId: string) => {
       try {
         // Example usage - in real app, this would open a form for user input
         const exampleRequest = {
@@ -474,7 +722,7 @@ class EffectRailwayApp {
           integrateWithExisting: [nodeId]
         };
         
-        const calculation = calculator.generateSystemExtension(exampleRequest);
+        const calculation = generateSystemExtension(this.currentData, exampleRequest);
         this.downloadText(`effect_extension_${exampleRequest.name}.md`, calculation);
         console.log('🧮 Effect extension generated for:', exampleRequest.name);
       } catch (error) {
@@ -483,9 +731,9 @@ class EffectRailwayApp {
       }
     };
 
-    (window as any).exportSystemOverview = () => {
+    window.exportSystemOverview = () => {
       try {
-        const overview = treeGenerator.generateSystemOverview();
+        const overview = generateSystemOverview(this.currentData!);
         this.downloadText('effect_system_overview.md', overview);
         console.log('📊 System overview exported');
       } catch (error) {
@@ -495,7 +743,7 @@ class EffectRailwayApp {
     };
 
     // API-based Effect Analysis Functions
-    (window as any).queryEffectAPI = async (query: string, operation: string = 'analyze', context?: string) => {
+    window.queryEffectAPI = async (query: string, operation: string = 'analyze', context?: string) => {
       try {
         const response = await fetch(`${API_BASE_URL}/analyze`, {
           method: 'POST',
@@ -532,15 +780,15 @@ class EffectRailwayApp {
     };
 
     // Quick API shortcuts for common operations
-    (window as any).analyzeEffect = (query: string) => (window as any).queryEffectAPI(query, 'analyze');
-    (window as any).modifyEffect = (query: string, context?: string) => (window as any).queryEffectAPI(query, 'modify', context);
-    (window as any).useEffect = (query: string, context?: string) => (window as any).queryEffectAPI(query, 'use', context);
-    (window as any).extendEffect = (query: string, context?: string) => (window as any).queryEffectAPI(query, 'extend', context);
+    window.analyzeEffect = (query: string) => window.queryEffectAPI(query, 'analyze');
+    window.modifyEffect = (query: string, context?: string) => window.queryEffectAPI(query, 'modify', context);
+    window.useEffect = (query: string, context?: string) => window.queryEffectAPI(query, 'use', context);
+    window.extendEffect = (query: string, context?: string) => window.queryEffectAPI(query, 'extend', context);
 
     // Legacy local functions (fallback)
-    (window as any).queryEffect = (query: string, operation: string = 'analyze', context?: string) => {
+    window.queryEffect = (query: string, operation: string = 'analyze', context?: string) => {
       try {
-        const report = targetedCalculator.generateLLMReport(query, operation, context);
+        const report = generateQuickReport(this.currentData, query, operation, context);
         console.log('🎯 Local Targeted Effect Analysis:');
         console.log(report);
         return report;
@@ -552,9 +800,9 @@ class EffectRailwayApp {
     };
 
     // Download targeted analysis
-    (window as any).downloadEffectAnalysis = (query: string, operation: string = 'analyze', context?: string) => {
+    window.downloadEffectAnalysis = (query: string, operation: string = 'analyze', context?: string) => {
       try {
-        const report = targetedCalculator.generateLLMReport(query, operation, context);
+        const report = generateQuickReport(this.currentData, query, operation, context);
         const filename = `effect_analysis_${query.replace(/[^a-zA-Z0-9]/g, '_')}.md`;
         this.downloadText(filename, report);
         console.log('📥 Targeted analysis downloaded:', filename);
@@ -573,7 +821,6 @@ class EffectRailwayApp {
     }
 
     try {
-      const treeGenerator = new LLMTreeGenerator(this.currentData);
       let combinedAnalysis = '';
       
       combinedAnalysis += '# 🤖 COMPLETE LLM ANALYSIS: Effect TS System\n\n';
@@ -591,7 +838,7 @@ class EffectRailwayApp {
       
       this.currentData.railway.nodes.forEach((node, index) => {
         try {
-          const analysis = treeGenerator.generateNodeAnalysis(node.id);
+          const analysis = generateNodeAnalysis(this.currentData, node.id);
           combinedAnalysis += `## ${index + 1}. ${analysis.rootNode.name}\n\n`;
           combinedAnalysis += analysis.fullDependencyTree;
           combinedAnalysis += '\n---\n\n';
@@ -649,7 +896,7 @@ class EffectRailwayApp {
         
         const exampleRequest = {
           name: `enhanced${exampleNode.name.replace(/[^a-zA-Z]/g, '')}`,
-          targetLayer: nodeType as any,
+          targetLayer: nodeType,
           requiredCapabilities: this.inferCapabilities(exampleNode),
           expectedOutputType: this.inferOutputType(exampleNode),
           errorScenarios: this.inferErrorScenarios(exampleNode),
@@ -657,7 +904,7 @@ class EffectRailwayApp {
         };
         
         try {
-          const calculation = calculator.generateSystemExtension(exampleRequest);
+          const calculation = generateSystemExtension(this.currentData, exampleRequest);
           allCalculations += calculation;
           allCalculations += '\n---\n\n';
         } catch (error) {
@@ -675,7 +922,7 @@ class EffectRailwayApp {
     }
   }
 
-  private inferCapabilities(node: any): string[] {
+  private inferCapabilities(node: EffectNode): string[] {
     const capabilities: string[] = [];
     const name = node.name.toLowerCase();
     
@@ -697,7 +944,7 @@ class EffectRailwayApp {
     return capabilities;
   }
 
-  private inferOutputType(node: any): string {
+  private inferOutputType(node: EffectNode): string {
     if (node.effectSignature?.success) {
       return node.effectSignature.success;
     }
@@ -713,7 +960,7 @@ class EffectRailwayApp {
     return 'unknown';
   }
 
-  private inferErrorScenarios(node: any): string[] {
+  private inferErrorScenarios(node: EffectNode): string[] {
     const scenarios: string[] = [];
     
     if (node.effectSignature?.error) {
@@ -747,7 +994,7 @@ class EffectRailwayApp {
     URL.revokeObjectURL(url);
   }
 
-  private displayAPIResult(result: any): void {
+  private displayAPIResult(result: APIAnalysisResult): void {
     // Show the code inspection panel if not visible
     const panel = document.getElementById('code-inspection-panel');
     if (panel) {
@@ -788,7 +1035,7 @@ Effect&lt;${sig.success || 'unknown'}, ${(sig.error || []).join(' | ') || 'never
     if (upstreamDeps) {
       upstreamDeps.innerHTML = '';
       if (result.upstreamNodes && result.upstreamNodes.length > 0) {
-        result.upstreamNodes.slice(0, 5).forEach((node: any) => {
+        result.upstreamNodes.slice(0, 5).forEach((node: EffectNode) => {
           const li = document.createElement('li');
           li.className = 'upstream';
           li.innerHTML = `
@@ -813,7 +1060,7 @@ Effect&lt;${sig.success || 'unknown'}, ${(sig.error || []).join(' | ') || 'never
     if (downstreamDeps) {
       downstreamDeps.innerHTML = '';
       if (result.downstreamNodes && result.downstreamNodes.length > 0) {
-        result.downstreamNodes.slice(0, 5).forEach((node: any) => {
+        result.downstreamNodes.slice(0, 5).forEach((node: EffectNode) => {
           const li = document.createElement('li');
           li.className = 'downstream';
           li.innerHTML = `

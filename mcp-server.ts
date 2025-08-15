@@ -35,6 +35,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import fetch from 'node-fetch';
+import { analyzeFunctions, FunctionAnalysisResult, FunctionInfo } from './src/analyzer/function-analyzer-pure.js';
+import { TopComplexFunction, FolderStatistics } from './src/analyzer/function-analyzer-types.js';
 
 interface EffectNode {
   id: string;
@@ -247,19 +249,19 @@ class EffectRailwayMCPServer {
       try {
         switch (name) {
           case 'analyze_effect':
-            return await this.analyzeEffect(args as any);
+            return await this.analyzeEffect(args as { query: string; operation?: string; refresh?: string });
           case 'list_effects':
-            return await this.listEffects(args as any);
+            return await this.listEffects(args as { limit?: number; type_filter?: string });
           case 'batch_analyze':
-            return await this.batchAnalyze(args as any);
+            return await this.batchAnalyze(args as { queries: Array<string | { query: string; operation?: string }> });
           case 'get_effect_dependencies':
-            return await this.getEffectDependencies(args as any);
+            return await this.getEffectDependencies(args as { query: string; include_transitive?: boolean });
           case 'assess_modification_risk':
-            return await this.assessModificationRisk(args as any);
+            return await this.assessModificationRisk(args as { query: string; modification_type?: string });
           case 'analyze_functions':
-            return await this.analyzeFunctions(args as any);
+            return await this.analyzeFunctions(args as { targetDir: string; includeDetails?: boolean });
           case 'start_api_server':
-            return await this.startApiServer(args as any);
+            return await this.startApiServer(args as { target_directory?: string; port?: number });
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -455,7 +457,7 @@ class EffectRailwayMCPServer {
 
       if (data.errors && data.errors.length > 0) {
         output.push('## ❌ Failed Analyses');
-        data.errors.forEach((error: any, index: number) => {
+        data.errors.forEach((error: { query: string; error: string }, index: number) => {
           output.push(`${index + 1}. **Query:** ${error.query} - **Error:** ${error.error}`);
         });
       }
@@ -504,19 +506,9 @@ class EffectRailwayMCPServer {
     const { targetDir, includeDetails = false } = args;
 
     try {
-      const response = await fetch(`${this.apiBaseUrl}/analyze/functions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetDir }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || `API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const analysis = data.analysis;
+      // Call the analyzer directly instead of via API
+      const { result: analysis, logs } = await analyzeFunctions(targetDir);
+      // Logs are returned but not printed (no side effects)
 
       const output = [
         `# 📊 Function Analysis: ${targetDir}`,
@@ -539,10 +531,10 @@ class EffectRailwayMCPServer {
       // Add folder statistics
       if (analysis.folderStats) {
         const folders = Object.entries(analysis.folderStats)
-          .sort((a: any, b: any) => b[1].totalFunctions - a[1].totalFunctions)
+          .sort((a: [string, FolderStatistics], b: [string, FolderStatistics]) => b[1].totalFunctions - a[1].totalFunctions)
           .slice(0, 10);
 
-        folders.forEach(([folder, stats]: [string, any]) => {
+        folders.forEach(([folder, stats]: [string, FolderStatistics]) => {
           output.push(
             `### ${folder}`,
             `- Functions: ${stats.totalFunctions}`,
@@ -557,7 +549,7 @@ class EffectRailwayMCPServer {
       // Add top complex functions
       if (analysis.topComplexFunctions && analysis.topComplexFunctions.length > 0) {
         output.push('## 🔥 Top Complex Functions');
-        analysis.topComplexFunctions.slice(0, 10).forEach((func: any, index: number) => {
+        analysis.topComplexFunctions.slice(0, 10).forEach((func: TopComplexFunction, index: number) => {
           output.push(
             `${index + 1}. **${func.name}** (${func.file}:${func.lines})`,
             `   - Dependencies: ${func.callsCount}`,
@@ -571,9 +563,9 @@ class EffectRailwayMCPServer {
       if (includeDetails && analysis.functions) {
         output.push('## 📝 All Functions (Top 50 by complexity)');
         analysis.functions
-          .sort((a: any, b: any) => b.callsCount - a.callsCount)
+          .sort((a: FunctionInfo, b: FunctionInfo) => b.callsCount - a.callsCount)
           .slice(0, 50)
-          .forEach((func: any) => {
+          .forEach((func: FunctionInfo) => {
             output.push(
               `- **${func.name}** (${func.file}:${func.startLine}-${func.endLine})`,
               `  Calls: ${func.callsCount} | Called by: ${func.calledByCount}`,

@@ -39,16 +39,8 @@ export class LogicalFlowLayout {
   private readonly MAX_NODES_PER_COLUMN = 15; // Multi-column layout for large datasets
   private readonly MAX_COLUMNS_PER_LAYER = 8; // Maximum columns per layer
 
-  // Logical layers (left to right)
-  private readonly LOGICAL_LAYERS = [
-    { key: 'entry', name: 'HTTP Entry', types: ['controller'], color: '#28a745' },
-    { key: 'middleware', name: 'Middleware', types: ['middleware'], color: '#6f42c1' },
-    { key: 'services', name: 'Business Logic', types: ['service'], color: '#007bff' },
-    { key: 'repositories', name: 'Data Access', types: ['repository'], color: '#ffc107' },
-    { key: 'workers', name: 'Background', types: ['worker'], color: '#fd7e14' },
-    { key: 'utilities', name: 'Utilities', types: ['utility'], color: '#6c757d' },
-    { key: 'errors', name: 'Error Types', types: ['error'], color: '#dc3545' }
-  ];
+  // Dynamic logical layers based on actual folders
+  private LOGICAL_LAYERS: Array<{ key: string; name: string; types: string[]; color: string }> = [];
 
   constructor(railway: EffectRailway, width: number, height: number) {
     this.railway = railway;
@@ -56,6 +48,107 @@ export class LogicalFlowLayout {
     this.edges = railway.edges;
     this.width = width;
     this.height = height;
+    
+    // Build dynamic layers based on actual node types/folders
+    this.buildDynamicLayers();
+  }
+  
+  private buildDynamicLayers(): void {
+    // Calculate average dependencies for each type/folder
+    const typeStats = new Map<string, { count: number; totalDeps: number; avgDeps: number }>();
+    
+    for (const node of this.nodes) {
+      const stats = typeStats.get(node.type) || { count: 0, totalDeps: 0, avgDeps: 0 };
+      const nodeDeps = (node.metrics?.callsCount || 0);
+      stats.count++;
+      stats.totalDeps += nodeDeps;
+      stats.avgDeps = stats.totalDeps / stats.count;
+      typeStats.set(node.type, stats);
+    }
+    
+    // Sort types by average dependencies (least to most)
+    const sortedTypes = Array.from(typeStats.keys()).sort((a, b) => {
+      const aStats = typeStats.get(a)!;
+      const bStats = typeStats.get(b)!;
+      
+      // Primary sort: by average dependencies (ascending)
+      if (aStats.avgDeps !== bStats.avgDeps) {
+        return aStats.avgDeps - bStats.avgDeps;
+      }
+      
+      // Secondary sort: by total dependencies
+      if (aStats.totalDeps !== bStats.totalDeps) {
+        return aStats.totalDeps - bStats.totalDeps;
+      }
+      
+      // Tertiary sort: alphabetically
+      return a.localeCompare(b);
+    });
+    
+    console.log('📊 Folder dependency order (least to most):');
+    sortedTypes.forEach((type, index) => {
+      const stats = typeStats.get(type)!;
+      console.log(`  ${index + 1}. ${type}: ${stats.avgDeps.toFixed(2)} avg deps (${stats.count} functions)`);
+    });
+    
+    // Create layers for each type with nodes
+    this.LOGICAL_LAYERS = sortedTypes.map((type, index) => ({
+      key: type,
+      name: this.formatLayerName(type),
+      types: [type],
+      color: this.getColorForType(type)
+    }));
+  }
+  
+  private formatLayerName(type: string): string {
+    // Format the folder name for display
+    return type
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  
+  private getColorForType(type: string): string {
+    // Predefined colors for common types
+    const colorMap: Record<string, string> = {
+      'routes': '#28a745',
+      'controllers': '#28a745',
+      'middleware': '#6f42c1',
+      'services': '#007bff',
+      'service': '#007bff',
+      'repositories': '#ffc107',
+      'repository': '#ffc107',
+      'workers': '#fd7e14',
+      'worker': '#fd7e14',
+      'utils': '#6c757d',
+      'utilities': '#6c757d',
+      'utility': '#6c757d',
+      'errors': '#dc3545',
+      'error': '#dc3545',
+      'config': '#17a2b8',
+      'schemas': '#e83e8c',
+      'types': '#20c997',
+      'tests': '#563d7c',
+      'examples': '#795548',
+      'scripts': '#9e9e9e',
+      'prompts': '#ff9800'
+    };
+    
+    // Return predefined color or generate one
+    if (colorMap[type]) {
+      return colorMap[type];
+    }
+    
+    // Generate a consistent color for unknown types
+    let hash = 0;
+    for (let i = 0; i < type.length; i++) {
+      hash = type.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    const hue = Math.abs(hash) % 360;
+    const saturation = 65 + (Math.abs(hash >> 8) % 20);
+    const lightness = 45 + (Math.abs(hash >> 16) % 15);
+    
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
   }
 
   public calculate(): Map<string, LogicalPosition> {
@@ -117,9 +210,14 @@ export class LogicalFlowLayout {
       );
       
       // Calculate actual layer width based on number of columns needed
+      // Dynamic width based on node count - grows with more nodes
+      const dynamicWidth = Math.max(
+        this.MIN_COLUMN_WIDTH,
+        this.BASE_LAYER_WIDTH / Math.max(1, 15 / sortedNodes.length)
+      );
       const actualLayerWidth = Math.max(
         this.BASE_LAYER_WIDTH,
-        numberOfColumns * this.MIN_COLUMN_WIDTH
+        numberOfColumns * dynamicWidth
       );
       
       const columnWidth = actualLayerWidth / numberOfColumns;
@@ -133,8 +231,9 @@ export class LogicalFlowLayout {
         const x = currentLayerStartX + (columnIndex * columnWidth) + (columnWidth / 2);
         
         // Calculate Y position with better spacing - account for header area
-        const headerHeight = 60; // Space reserved for layer headers
-        const availableHeight = this.height - headerHeight - (this.NODE_PADDING * 2);
+        const headerHeight = 80; // Increased space for layer headers to avoid overlap
+        const bottomPadding = 40; // Space at bottom
+        const availableHeight = this.height - headerHeight - bottomPadding;
         const effectiveNodesInColumn = Math.min(nodesPerColumn, sortedNodes.length - (columnIndex * nodesPerColumn));
         
         let y: number;
@@ -164,32 +263,26 @@ export class LogicalFlowLayout {
   }
 
   private sortNodesForLayer(nodes: EffectNode[], layerIndex: number): EffectNode[] {
-    // Sort entry points (controllers) by HTTP method/path
-    if (layerIndex === 0) { // Entry layer
-      return nodes.sort((a, b) => {
-        // PUT entry points first (they're typically the main endpoints)
-        if (a.name.includes('GET') && !b.name.includes('GET')) return -1;
-        if (!a.name.includes('GET') && b.name.includes('GET')) return 1;
-        return a.name.localeCompare(b.name);
-      });
-    }
-    
-    // Sort services by importance (database, logger, etc.)
-    if (layerIndex === 2) { // Services layer
-      const serviceOrder = ['DatabaseService', 'LoggerService', 'QueueService', 'HttpService'];
-      return nodes.sort((a, b) => {
-        const aIndex = serviceOrder.findIndex(s => a.name.includes(s));
-        const bIndex = serviceOrder.findIndex(s => b.name.includes(s));
-        
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-        if (aIndex !== -1) return -1;
-        if (bIndex !== -1) return 1;
-        return a.name.localeCompare(b.name);
-      });
-    }
-    
-    // Default alphabetical sort
-    return nodes.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort nodes within each layer by their dependency count (least to most)
+    return nodes.sort((a, b) => {
+      const aDeps = a.metrics?.callsCount || 0;
+      const bDeps = b.metrics?.callsCount || 0;
+      
+      // Primary sort: by dependency count (ascending)
+      if (aDeps !== bDeps) {
+        return aDeps - bDeps;
+      }
+      
+      // Secondary sort: by called-by count (descending - more popular functions first)
+      const aCalledBy = a.metrics?.calledByCount || 0;
+      const bCalledBy = b.metrics?.calledByCount || 0;
+      if (aCalledBy !== bCalledBy) {
+        return bCalledBy - aCalledBy;
+      }
+      
+      // Tertiary sort: alphabetically
+      return a.name.localeCompare(b.name);
+    });
   }
 
   private applyPositions(positions: Map<string, LogicalPosition>): void {

@@ -39,15 +39,7 @@ export class RailwayRenderer {
   private selectedNode: EffectNode | null = null;
   private highlightedNodes: Set<string> = new Set();
 
-  private nodeColors: Record<NodeType, string> = {
-    controller: '#28a745',
-    service: '#007bff', 
-    repository: '#ffc107',
-    middleware: '#6f42c1',
-    worker: '#fd7e14',
-    error: '#dc3545',
-    utility: '#6c757d'
-  };
+  private nodeColors: Map<string, string> = new Map();
 
   private edgeColors: Record<EdgeType, string> = {
     success: '#28a745',
@@ -59,9 +51,9 @@ export class RailwayRenderer {
   constructor(svgElement: SVGSVGElement) {
     this.svg = d3.select(svgElement);
     
-    // RESPONSIVE SIZING FOR LARGE DATASETS - Calculate based on content
-    this.width = Math.max(svgElement.clientWidth || 1200, 4000); // Much wider for large datasets
-    this.height = Math.max(svgElement.clientHeight || 800, 1400); // Taller for large datasets
+    // Use viewport dimensions initially
+    this.width = svgElement.clientWidth || 1200;
+    this.height = svgElement.clientHeight || 800;
     
     // Clear existing content
     this.svg.selectAll('*').remove();
@@ -92,16 +84,7 @@ export class RailwayRenderer {
         }
       });
     
-    // Set initial zoom after container is created
-    setTimeout(() => {
-      const initialScale = 0.3; // Start more zoomed out for large datasets
-      if (this.zoomBehavior) {
-        this.svg.call(
-          this.zoomBehavior.transform,
-          d3.zoomIdentity.scale(initialScale).translate(100, 100)
-        );
-      }
-    }, 100);
+    // Initial zoom will be set after rendering
     
     // Add definitions for arrowheads and patterns
     this.setupDefinitions();
@@ -169,6 +152,11 @@ export class RailwayRenderer {
     
     this.renderVisualization();
     this.updateStatistics();
+    
+    // Zoom to fit after rendering is complete
+    setTimeout(() => {
+      this.zoomToFit();
+    }, 300);
   }
 
   private renderVisualization(): void {
@@ -234,9 +222,10 @@ export class RailwayRenderer {
       .attr('r', (d: EffectNode) => this.getNodeRadius(d.type))
       .attr('fill', (d: EffectNode) => {
         const isEntryPoint = this.currentData!.railway.entryPoints.includes(d.id);
-        return isEntryPoint ? this.nodeColors[d.type] : this.lightenColor(this.nodeColors[d.type], 0.1);
+        const color = this.getNodeColor(d.type);
+        return isEntryPoint ? color : this.lightenColor(color, 0.1);
       })
-      .attr('stroke', (d: EffectNode) => this.nodeColors[d.type])
+      .attr('stroke', (d: EffectNode) => this.getNodeColor(d.type))
       .attr('stroke-width', (d: EffectNode) => {
         const isEntryPoint = this.currentData!.railway.entryPoints.includes(d.id);
         return isEntryPoint ? 3 : 2;
@@ -261,7 +250,7 @@ export class RailwayRenderer {
       .attr('dy', '2.2em')
       .attr('font-size', '8px')
       .attr('font-weight', '600')
-      .attr('fill', (d: EffectNode) => this.nodeColors[d.type])
+      .attr('fill', (d: EffectNode) => this.getNodeColor(d.type))
       .attr('pointer-events', 'none')
       .style('text-shadow', '0 1px 2px rgba(255,255,255,0.9)');
     
@@ -299,6 +288,58 @@ export class RailwayRenderer {
     }
   }
 
+
+  private getNodeColor(type: string): string {
+    // Check if we already have a color for this type
+    if (this.nodeColors.has(type)) {
+      return this.nodeColors.get(type)!;
+    }
+    
+    // Predefined colors for common types
+    const colorMap: Record<string, string> = {
+      'routes': '#28a745',
+      'controllers': '#28a745',
+      'middleware': '#6f42c1',
+      'services': '#007bff',
+      'service': '#007bff',
+      'repositories': '#ffc107',
+      'repository': '#ffc107',
+      'workers': '#fd7e14',
+      'worker': '#fd7e14',
+      'utils': '#6c757d',
+      'utilities': '#6c757d',
+      'utility': '#6c757d',
+      'errors': '#dc3545',
+      'error': '#dc3545',
+      'config': '#17a2b8',
+      'schemas': '#e83e8c',
+      'types': '#20c997',
+      'tests': '#563d7c',
+      'examples': '#795548',
+      'scripts': '#9e9e9e',
+      'prompts': '#ff9800'
+    };
+    
+    // Return predefined color or generate one
+    if (colorMap[type]) {
+      this.nodeColors.set(type, colorMap[type]);
+      return colorMap[type];
+    }
+    
+    // Generate a consistent color for unknown types
+    let hash = 0;
+    for (let i = 0; i < type.length; i++) {
+      hash = type.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    const hue = Math.abs(hash) % 360;
+    const saturation = 65 + (Math.abs(hash >> 8) % 20);
+    const lightness = 45 + (Math.abs(hash >> 16) % 15);
+    
+    const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    this.nodeColors.set(type, color);
+    return color;
+  }
 
   public filterByType(type: string): void {
     if (!this.currentData) return;
@@ -347,84 +388,163 @@ export class RailwayRenderer {
   public zoomToFit(): void {
     if (!this.zoomBehavior) return;
     
-    // Calculate bounds of all nodes
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    
-    for (const node of this.filteredNodes) {
-      if (node.x !== undefined && node.y !== undefined) {
-        minX = Math.min(minX, node.x - 50);
-        minY = Math.min(minY, node.y - 50);
-        maxX = Math.max(maxX, node.x + 50);
-        maxY = Math.max(maxY, node.y + 50);
-      }
+    // Prevent multiple rapid calls
+    if (this.zoomTimeout) {
+      clearTimeout(this.zoomTimeout);
     }
     
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    
-    if (contentWidth > 0 && contentHeight > 0) {
-      const scale = Math.min(
-        (this.width * 0.9) / contentWidth,
-        (this.height * 0.9) / contentHeight
-      );
+    this.zoomTimeout = setTimeout(() => {
+      // Get the actual bounding box of ALL content in the container
+      const containerNode = this.container.node();
+      if (!containerNode) return;
       
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
+      const bbox = containerNode.getBBox();
       
+      // Skip if bbox is invalid or too small (not rendered yet)
+      if (bbox.width < 200 || bbox.height < 200) {
+        console.log('⏭️ Skipping zoom - content not ready:', bbox);
+        return;
+      }
+      
+      // Add padding around the content
+      const padding = 50;
+      const contentWidth = bbox.width + (padding * 2);
+      const contentHeight = bbox.height + (padding * 2);
+      
+      // Get the SVG dimensions (viewport)
+      const svgElement = this.svg.node();
+      if (!svgElement) return;
+      
+      const viewportWidth = svgElement.clientWidth || this.width;
+      const viewportHeight = svgElement.clientHeight || this.height;
+      
+      // Calculate scale to fit all content within viewport
+      const scaleX = viewportWidth / contentWidth;
+      const scaleY = viewportHeight / contentHeight;
+      const scale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave some margin
+      
+      // Calculate center of content
+      const centerX = bbox.x + bbox.width / 2;
+      const centerY = bbox.y + bbox.height / 2;
+      
+      // Apply transform to center and scale the content
       this.svg.call(
         this.zoomBehavior.transform,
         d3.zoomIdentity
-          .translate(this.width / 2, this.height / 2)
+          .translate(viewportWidth / 2, viewportHeight / 2)
           .scale(scale)
           .translate(-centerX, -centerY)
       );
-    }
+      
+      console.log('🔍 Zoom to fit:', {
+        bbox,
+        contentWidth,
+        contentHeight,
+        viewportWidth,
+        viewportHeight,
+        scale,
+        centerX,
+        centerY
+      });
+    }, 100);
   }
+  
+  private zoomTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private getNodeIcon(type: NodeType): string {
-    const icons: Record<NodeType, string> = {
-      controller: '🌐', // Web/HTTP entry point
-      service: '⚙️',   // Business logic processing
-      repository: '💾', // Data storage access
-      middleware: '🔗', // Request pipeline
-      worker: '⚡',     // Background processing
-      error: '🚨',      // Error/exception
-      utility: '🛠️'    // Helper functions
+    const icons: Record<string, string> = {
+      'routes': '🌐',      // Web/HTTP routes
+      'controllers': '🌐', // Web/HTTP controllers
+      'services': '⚙️',    // Business logic processing
+      'service': '⚙️',     // Business logic processing
+      'repositories': '💾', // Data storage access
+      'repository': '💾',  // Data storage access
+      'middleware': '🔗',  // Request pipeline
+      'workers': '⚡',     // Background processing
+      'worker': '⚡',      // Background processing
+      'errors': '🚨',      // Error/exception
+      'error': '🚨',       // Error/exception
+      'utils': '🛠️',      // Helper functions
+      'utilities': '🛠️',  // Helper functions
+      'utility': '🛠️',    // Helper functions
+      'config': '⚙️',      // Configuration
+      'schemas': '📋',     // Data schemas
+      'types': '📝',       // Type definitions
+      'tests': '🧪',       // Test files
+      'examples': '📚',    // Example code
+      'scripts': '📜',     // Scripts
+      'prompts': '💬'      // Prompts
     };
     return icons[type] || '📦';
   }
 
   private getNodeRadius(type: NodeType): number {
-    // COMPACT SIZES FOR LARGE DATASETS
-    const radii: Record<NodeType, number> = {
-      controller: 14,   // Entry points - slightly larger
-      service: 12,      // Services - medium
-      repository: 12,   // Repositories - medium
-      middleware: 10,   // Middleware - smaller
-      worker: 11,       // Workers - medium-small
-      error: 8,         // Errors - smallest
-      utility: 9        // Utilities - small
+    // COMPACT SIZES FOR LARGE DATASETS - use default size for all dynamic types
+    const radii: Record<string, number> = {
+      'routes': 14,       // Entry points - slightly larger
+      'controllers': 14,  // Controllers - slightly larger
+      'services': 12,     // Services - medium
+      'service': 12,      // Service - medium
+      'repositories': 12, // Repositories - medium
+      'repository': 12,   // Repository - medium
+      'middleware': 10,   // Middleware - smaller
+      'workers': 11,      // Workers - medium-small
+      'worker': 11,       // Worker - medium-small
+      'errors': 8,        // Errors - smallest
+      'error': 8,         // Error - smallest
+      'utils': 9,         // Utilities - small
+      'utilities': 9,     // Utilities - small
+      'utility': 9,       // Utility - small
+      'config': 10,       // Config - small-medium
+      'schemas': 10,      // Schemas - small-medium
+      'types': 9,         // Types - small
+      'tests': 9,         // Tests - small
+      'examples': 9,      // Examples - small
+      'scripts': 9,       // Scripts - small
+      'prompts': 10       // Prompts - small-medium
     };
     return radii[type] || 10;
   }
 
   private isImportantNode(node: EffectNode): boolean {
     // Only show labels for important nodes to reduce clutter
-    return node.type === 'controller' || // All HTTP entry points
+    return node.type === 'routes' || // Routes
+           node.type === 'controllers' || // Controllers
            this.currentData!.railway.entryPoints.includes(node.id) || // Entry points
-           node.name.includes('Service') || // Core services
-           node.name.includes('Repository') || // Data access
-           node.name.includes('Error'); // Error types
+           node.metrics?.calledByCount >= 5 || // Frequently called functions
+           node.metrics?.callsCount === 0 || // Functions with no dependencies
+           node.name.toLowerCase().includes('main') || // Main functions
+           node.name.toLowerCase().includes('init') || // Initialization functions
+           node.name.toLowerCase().includes('error'); // Error handlers
   }
 
   private lightenColor(color: string, amount: number): string {
-    // Lighten hex colors for non-entry-point nodes
-    const hex = color.replace('#', '');
-    const num = parseInt(hex, 16);
-    const r = Math.min(255, Math.floor((num >> 16) + amount * 255));
-    const g = Math.min(255, Math.floor(((num >> 8) & 0x00FF) + amount * 255));
-    const b = Math.min(255, Math.floor((num & 0x0000FF) + amount * 255));
-    return `rgb(${r}, ${g}, ${b})`;
+    // Handle both hex and HSL colors
+    if (color.startsWith('hsl')) {
+      // Parse HSL color
+      const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+      if (match) {
+        const h = parseInt(match[1]);
+        const s = parseInt(match[2]);
+        const l = parseInt(match[3]);
+        // Lighten by increasing lightness
+        const newL = Math.min(100, l + (amount * 30));
+        return `hsl(${h}, ${s}%, ${newL}%)`;
+      }
+    }
+    
+    // Handle hex colors
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      const num = parseInt(hex, 16);
+      const r = Math.min(255, Math.floor((num >> 16) + amount * 255));
+      const g = Math.min(255, Math.floor(((num >> 8) & 0x00FF) + amount * 255));
+      const b = Math.min(255, Math.floor((num & 0x0000FF) + amount * 255));
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+    
+    // Return original color if format not recognized
+    return color;
   }
 
   private truncateText(text: string, maxLength: number): string {
@@ -448,8 +568,27 @@ export class RailwayRenderer {
     `;
     
     tooltip.style.display = 'block';
-    tooltip.style.left = (event.pageX + 10) + 'px';
-    tooltip.style.top = (event.pageY + 10) + 'px';
+    
+    // Fix tooltip position - use clientX/Y instead of pageX/Y for accurate positioning
+    const rect = (event.target as Element).getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    
+    // Position tooltip near the cursor but ensure it stays within viewport
+    let left = event.clientX + 10;
+    let top = event.clientY + 10;
+    
+    // Adjust if tooltip would go off the right edge
+    if (left + tooltipRect.width > window.innerWidth) {
+      left = event.clientX - tooltipRect.width - 10;
+    }
+    
+    // Adjust if tooltip would go off the bottom edge
+    if (top + tooltipRect.height > window.innerHeight) {
+      top = event.clientY - tooltipRect.height - 10;
+    }
+    
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
   }
 
   private hideTooltip(): void {
@@ -566,7 +705,7 @@ export class RailwayRenderer {
   private updateEdgeHighlighting(): void {
     if (!this.container.select('.logical-flows').empty()) {
       this.container.select('.logical-flows').selectAll('path')
-        .style('display', (d: any, i: number, nodes: any[]) => {
+        .style('display', (_d, i: number, nodes) => {
           const pathElement = nodes[i];
           const edgeId = pathElement.getAttribute('data-edge-id');
           
@@ -581,7 +720,7 @@ export class RailwayRenderer {
           
           return 'none';
         })
-        .style('stroke-width', (d: any, i: number, nodes: any[]) => {
+        .style('stroke-width', (_d, i: number, nodes) => {
           const pathElement = nodes[i];
           const edgeId = pathElement.getAttribute('data-edge-id');
           const edge = this.filteredEdges.find(e => e.id === edgeId);
@@ -591,7 +730,7 @@ export class RailwayRenderer {
           }
           return '2px';
         })
-        .style('opacity', (d: any, i: number, nodes: any[]) => {
+        .style('opacity', (_d, i: number, nodes) => {
           const pathElement = nodes[i];
           const edgeId = pathElement.getAttribute('data-edge-id');
           const edge = this.filteredEdges.find(e => e.id === edgeId);
@@ -601,7 +740,7 @@ export class RailwayRenderer {
           }
           return '0.7';
         })
-        .attr('marker-end', (d: any, i: number, nodes: any[]) => {
+        .attr('marker-end', (_d, i: number, nodes) => {
           const pathElement = nodes[i];
           const edgeId = pathElement.getAttribute('data-edge-id');
           const edge = this.filteredEdges.find(e => e.id === edgeId);
@@ -635,7 +774,7 @@ export class RailwayRenderer {
         .style('display', 'block') // Show all edges again
         .style('stroke-width', '2px') // Reset stroke width
         .style('opacity', '0.7') // Reset opacity
-        .attr('marker-end', (d: any, i: number, nodes: any[]) => {
+        .attr('marker-end', (_d, i: number, nodes) => {
           // Reset to regular arrows
           const pathElement = nodes[i];
           const edgeType = this.getEdgeTypeFromFlow(pathElement.classList.contains('request-flow') ? 'request-flow' : 
@@ -1141,6 +1280,32 @@ export class RailwayRenderer {
     document.getElementById('total-nodes')!.textContent = stats.totalNodes.toString();
     document.getElementById('total-edges')!.textContent = stats.totalEdges.toString();
     
+    // Update filter dropdown with dynamic folder types
+    const filterSelect = document.getElementById('filter-select') as HTMLSelectElement;
+    if (filterSelect) {
+      // Keep the first "All Types" option
+      const allOption = filterSelect.querySelector('option[value="all"]');
+      filterSelect.innerHTML = '';
+      if (allOption) {
+        filterSelect.appendChild(allOption);
+      } else {
+        const option = document.createElement('option');
+        option.value = 'all';
+        option.textContent = 'All Types';
+        filterSelect.appendChild(option);
+      }
+      
+      // Add dynamic folder options
+      Object.entries(stats.nodesPerType).forEach(([type, count]) => {
+        if (count > 0) {
+          const option = document.createElement('option');
+          option.value = type;
+          option.textContent = `${type} (${count})`;
+          filterSelect.appendChild(option);
+        }
+      });
+    }
+    
     // Update node types list
     const nodeTypesList = document.getElementById('node-types-list')!;
     nodeTypesList.innerHTML = '';
@@ -1149,9 +1314,11 @@ export class RailwayRenderer {
       if (count > 0) {
         const div = document.createElement('div');
         div.className = `node-type ${type}`;
+        // Use a default color for dynamic types
+        const color = this.getNodeColor(type);
         div.innerHTML = `
           <div>
-            <span class="type-icon" style="background-color: ${this.nodeColors[type as NodeType]}"></span>
+            <span class="type-icon" style="background-color: ${color}"></span>
             ${type}
           </div>
           <span>${count}</span>

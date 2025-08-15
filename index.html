@@ -307,7 +307,7 @@
         }
 
         .tooltip {
-            position: absolute;
+            position: fixed;
             background: rgba(0, 0, 0, 0.9);
             color: white;
             padding: 0.75rem;
@@ -410,9 +410,25 @@
 
             <div class="controls">
                 <div class="control-group">
+                    <label>📁 Target Directory</label>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" 
+                               id="target-directory" 
+                               placeholder="/path/to/analyze"
+                               value="/Users/chrislemmer/Dev/SwiftCom/effect-rop-mapper/src"
+                               style="flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                        <button id="analyze-button" 
+                                style="padding: 0.5rem 1rem; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                            Analyze
+                        </button>
+                    </div>
+                    <div id="analysis-status" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;"></div>
+                </div>
+                
+                <div class="control-group">
                     <label>⚡ Logical Flow Layout</label>
                     <div style="padding: 0.5rem; background: #e8f4f8; border-radius: 4px; font-size: 0.85rem; color: #0066cc;">
-                        Left-to-right request flow: HTTP Entry → Middleware → Business Logic → Data Access
+                        Left-to-right by dependencies: Least deps → Most deps
                     </div>
                 </div>
                 
@@ -420,10 +436,6 @@
                     <label>Filter by Type</label>
                     <select id="filter-select">
                         <option value="all">All Types</option>
-                        <option value="controller">Controllers Only</option>
-                        <option value="service">Services Only</option>
-                        <option value="repository">Repositories Only</option>
-                        <option value="error">Error Types</option>
                     </select>
                 </div>
 

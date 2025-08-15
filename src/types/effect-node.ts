@@ -13,7 +13,8 @@
  * ```
  */
 
-export type NodeType = 'controller' | 'service' | 'repository' | 'middleware' | 'utility' | 'worker' | 'error';
+// NodeType can be predefined types or any folder name string
+export type NodeType = 'controller' | 'service' | 'repository' | 'middleware' | 'utility' | 'worker' | 'error' | string;
 
 export type EdgeType = 'success' | 'error' | 'dependency' | 'pipe';
 
@@ -31,6 +32,12 @@ export interface EffectNode {
   line: number;
   effectSignature?: EffectSignature;
   description?: string;
+  folder?: string; // Full folder path
+  metrics?: {
+    callsCount: number;
+    calledByCount: number;
+    lines: number;
+  };
   // D3 layout properties
   x?: number;
   y?: number;
@@ -69,9 +76,19 @@ export interface AnalysisResult {
   statistics: {
     totalNodes: number;
     totalEdges: number;
-    nodesPerType: Record<NodeType, number>;
+    nodesPerType: Record<string, number>; // Dynamic folder names as keys
+    nodesByFolder?: Record<string, number>; // Full folder paths
     edgesPerType: Record<EdgeType, number>;
     errorTypes: string[];
     dependencyTypes: string[];
+    complexity?: {
+      zero: number;
+      low: number;
+      medium: number;
+      high: number;
+      veryHigh: number;
+    };
+    avgDependencies?: number;
+    totalFolders?: number;
   };
 }
