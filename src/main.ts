@@ -300,6 +300,43 @@ class EffectRailwayApp {
     }
   }
 
+  private mapFolderToNodeType(folder: string): NodeType {
+    const folderLower = folder.toLowerCase();
+    
+    if (folderLower.includes('controller') || folderLower.includes('handler') || folderLower.includes('route')) {
+      return 'controller';
+    }
+    if (folderLower.includes('service') || folderLower.includes('business') || folderLower.includes('domain')) {
+      return 'service';
+    }
+    if (folderLower.includes('repository') || folderLower.includes('dao') || folderLower.includes('database') || folderLower.includes('db')) {
+      return 'repository';
+    }
+    if (folderLower.includes('middleware') || folderLower.includes('auth') || folderLower.includes('guard')) {
+      return 'middleware';
+    }
+    if (folderLower.includes('worker') || folderLower.includes('job') || folderLower.includes('queue')) {
+      return 'worker';
+    }
+    if (folderLower.includes('error') || folderLower.includes('exception')) {
+      return 'error';
+    }
+    if (folderLower.includes('util') || folderLower.includes('helper') || folderLower.includes('common')) {
+      return 'utility';
+    }
+    
+    // Default mapping based on common patterns
+    if (folderLower === 'models' || folderLower === 'entities') {
+      return 'repository';
+    }
+    if (folderLower === 'api' || folderLower === 'rest') {
+      return 'controller';
+    }
+    
+    // Default to service for unknown folders
+    return 'service';
+  }
+
   private convertFunctionAnalysisToRailway(functionAnalysis: FunctionAnalysisResult): AnalysisResult {
     const nodes: EffectNode[] = [];
     const edges: EffectEdge[] = [];
@@ -349,13 +386,13 @@ class EffectRailwayApp {
         const functionKey = `${func.file}:${func.name}:${func.startLine}`;
         nodeMap.set(functionKey, nodeId);
         
-        // Use the folder as the type directly
-        const folderType = folder;
+        // Map folder to node type
+        const nodeType = this.mapFolderToNodeType(folder);
         
         nodes.push({
           id: nodeId,
           name: func.name,
-          type: folderType, // Use actual folder name as type
+          type: nodeType, // Use mapped node type
           filePath: func.file,
           line: func.startLine,
           description: `${func.kind} with ${func.callsCount} dependencies`,

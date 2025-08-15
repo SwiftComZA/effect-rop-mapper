@@ -283,6 +283,10 @@ export class RailwayRendererBridge {
     this.updateVisualization(filteredState);
   }
 
+  public filterByType(type: string): void {
+    this.filter(type);
+  }
+
   public highlightDependencies(nodeId: string, direction: 'upstream' | 'downstream' | 'both'): void {
     if (!this.currentState) return;
     

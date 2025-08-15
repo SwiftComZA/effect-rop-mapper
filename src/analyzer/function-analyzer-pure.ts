@@ -132,10 +132,10 @@ const getFunctionName = (node: ts.Node): string | null => {
   
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     const parent = node.parent;
-    if (ts.isVariableDeclaration(parent)) {
+    if (parent && ts.isVariableDeclaration(parent)) {
       return parent.name.getText();
     }
-    if (ts.isPropertyAssignment(parent)) {
+    if (parent && ts.isPropertyAssignment(parent)) {
       return parent.name.getText();
     }
   }
