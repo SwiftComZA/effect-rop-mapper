@@ -217,25 +217,53 @@ export class RailwayRendererBridge {
   }
 
   private setupEventHandlers(handlers: EventHandlers): void {
+    console.log('Setting up event handlers, currentState:', this.currentState);
+    console.log('Node positions:', this.currentState?.nodes);
+    
     // Setup node interactions
     this.container.selectAll('.node')
-      .on('click', (_event, d: any) => {
+      .on('click', (event, d: any) => {
+        console.log('Node clicked, d:', d, 'event:', event);
+        
         if (handlers.onNodeClick && this.currentState) {
-          const nodePos = this.currentState.nodes.find(n => 
-            n.x === d.x && n.y === d.y
-          );
-          if (nodePos) {
-            handlers.onNodeClick(nodePos.node);
+          // Find the node by matching the transform position
+          const transform = d3.select(event.currentTarget).attr('transform');
+          console.log('Transform:', transform);
+          
+          // Extract x,y from transform
+          const match = transform?.match(/translate\(([^,]+),([^)]+)\)/);
+          if (match) {
+            const x = parseFloat(match[1]);
+            const y = parseFloat(match[2]);
+            console.log('Extracted position:', x, y);
+            
+            const nodePos = this.currentState.nodes.find(n => 
+              Math.abs(n.x - x) < 0.01 && Math.abs(n.y - y) < 0.01
+            );
+            console.log('Found node position:', nodePos);
+            
+            if (nodePos) {
+              handlers.onNodeClick(nodePos.node);
+            }
           }
         }
       })
-      .on('mouseover', (event, d: any) => {
+      .on('mouseover', (event) => {
         if (this.tooltip && this.currentState) {
-          const nodePos = this.currentState.nodes.find(n => 
-            n.x === d.x && n.y === d.y
-          );
-          if (nodePos) {
-            this.showTooltip(event, nodePos.node);
+          const transform = d3.select(event.currentTarget).attr('transform');
+          const match = transform?.match(/translate\(([^,]+),([^)]+)\)/);
+          
+          if (match) {
+            const x = parseFloat(match[1]);
+            const y = parseFloat(match[2]);
+            
+            const nodePos = this.currentState.nodes.find(n => 
+              Math.abs(n.x - x) < 0.01 && Math.abs(n.y - y) < 0.01
+            );
+            
+            if (nodePos) {
+              this.showTooltip(event, nodePos.node);
+            }
           }
         }
       })

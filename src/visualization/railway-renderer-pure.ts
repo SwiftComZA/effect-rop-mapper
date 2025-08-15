@@ -177,7 +177,48 @@ export interface RailwayMetrics {
   avgDependencies: number;
 }
 
-// Color schemes
+// Predefined color palette for folders
+const COLOR_PALETTE = [
+  '#28a745', // Green
+  '#007bff', // Blue
+  '#6f42c1', // Purple
+  '#ffc107', // Yellow
+  '#fd7e14', // Orange
+  '#dc3545', // Red
+  '#17a2b8', // Cyan
+  '#e83e8c', // Pink
+  '#20c997', // Teal
+  '#563d7c', // Dark Purple
+  '#795548', // Brown
+  '#ff9800', // Deep Orange
+  '#3B82F6', // Light Blue
+  '#10B981', // Emerald
+  '#8B5CF6', // Violet
+  '#F59E0B', // Amber
+  '#EC4899', // Magenta
+  '#06B6D4', // Sky Blue
+];
+
+// Map to store folder -> color assignments
+const folderColorMap = new Map<string, string>();
+let colorIndex = 0;
+
+// Function to get consistent color for a folder
+const getNodeColorByFolder = (folder: string): string => {
+  // Check if we already assigned a color to this folder
+  if (folderColorMap.has(folder)) {
+    return folderColorMap.get(folder)!;
+  }
+  
+  // Assign next color from palette
+  const color = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
+  folderColorMap.set(folder, color);
+  colorIndex++;
+  
+  return color;
+};
+
+// Color schemes - fallback for legacy code
 const NODE_COLORS: Record<NodeType, string> = {
   controller: '#8B5CF6',
   service: '#3B82F6',
@@ -195,17 +236,22 @@ const EDGE_COLORS: Record<EdgeType, string> = {
   pipe: '#3B82F6'
 };
 
-const NODE_ICONS: Record<NodeType, string> = {
-  controller: '⚡',
-  service: '⚙️',
-  repository: '💾',
-  middleware: '🔗',
-  worker: '👷',
-  utility: '🔧',
-  error: '⚠️'
+
+// Layout constants based on original implementation
+const LAYOUT_CONFIG = {
+  BASE_LAYER_WIDTH: 250,
+  MIN_COLUMN_WIDTH: 120,
+  LAYER_PADDING: 100,
+  NODE_HEIGHT: 45,
+  NODE_PADDING: 15,
+  MIN_NODE_SPACING: 35,
+  MAX_NODES_PER_COLUMN: 15,
+  MAX_COLUMNS_PER_LAYER: 8,
+  HEADER_HEIGHT: 80,
+  BOTTOM_PADDING: 40
 };
 
-// Pure function to calculate node positions (vertical lanes by type)
+// Pure function to calculate node positions with proper spacing and multi-column layout
 const calculateNodePositions = (
   nodes: EffectNode[],
   edges: Array<{ source: string; target: string; type: EdgeType }>,
@@ -213,53 +259,143 @@ const calculateNodePositions = (
   height: number,
   entryPoints: string[]
 ): NodePosition[] => {
-  // Define vertical lanes for each node type
-  const laneOrder: NodeType[] = ['controller', 'middleware', 'service', 'repository', 'worker', 'utility', 'error'];
-  const laneWidth = width / laneOrder.length;
-  
-  // Group nodes by type
-  const nodesByType = new Map<NodeType, EffectNode[]>();
-  laneOrder.forEach(type => nodesByType.set(type, []));
-  
+  // Calculate relationship counts for each node
+  const relationshipCounts = new Map<string, number>();
   nodes.forEach(node => {
-    const typeNodes = nodesByType.get(node.type) || [];
-    typeNodes.push(node);
-    nodesByType.set(node.type, typeNodes);
+    relationshipCounts.set(node.id, 0);
+  });
+  edges.forEach(edge => {
+    relationshipCounts.set(edge.source, (relationshipCounts.get(edge.source) || 0) + 1);
+    relationshipCounts.set(edge.target, (relationshipCounts.get(edge.target) || 0) + 1);
   });
   
-  // Calculate positions
-  const positions: NodePosition[] = [];
+  // Group nodes by folder/subfolder structure
+  const nodesByFolder = new Map<string, EffectNode[]>();
   
-  laneOrder.forEach((type, laneIndex) => {
-    const nodesInLane = nodesByType.get(type) || [];
-    const laneX = (laneIndex + 0.5) * laneWidth;
+  nodes.forEach(node => {
+    let folder = node.folder || 'root';
     
-    // Sort nodes in lane by their dependencies (entry points first)
-    nodesInLane.sort((a, b) => {
+    if (!node.folder && node.filePath) {
+      const pathParts = node.filePath.split('/').filter(p => p);
+      if (pathParts.length > 1) {
+        folder = pathParts.slice(0, Math.min(2, pathParts.length - 1)).join('/');
+      }
+    }
+    
+    if (!nodesByFolder.has(folder)) {
+      nodesByFolder.set(folder, []);
+    }
+    nodesByFolder.get(folder)!.push(node);
+  });
+  
+  // Calculate average relationships per folder to sort folders
+  const folderAverageRelationships = new Map<string, number>();
+  nodesByFolder.forEach((nodes, folder) => {
+    const totalRelationships = nodes.reduce((sum, node) => 
+      sum + (relationshipCounts.get(node.id) || 0), 0
+    );
+    folderAverageRelationships.set(folder, totalRelationships / nodes.length);
+  });
+  
+  // Sort folders by average relationship count (least connected on left, most on right)
+  const sortedFolders = Array.from(nodesByFolder.keys()).sort((a, b) => {
+    const avgA = folderAverageRelationships.get(a) || 0;
+    const avgB = folderAverageRelationships.get(b) || 0;
+    return avgA - avgB;
+  });
+  
+  const positions: NodePosition[] = [];
+  let currentLayerStartX = LAYOUT_CONFIG.LAYER_PADDING;
+  
+  sortedFolders.forEach((folder, folderIndex) => {
+    const nodesInFolder = nodesByFolder.get(folder) || [];
+    
+    // Sort nodes within folder - MOST dependencies on LEFT, LEAST on RIGHT
+    const sortedNodes = [...nodesInFolder].sort((a, b) => {
+      const aRels = relationshipCounts.get(a.id) || 0;
+      const bRels = relationshipCounts.get(b.id) || 0;
+      
+      // Primary sort: by relationship count (DESCENDING - most dependencies first)
+      if (aRels !== bRels) return bRels - aRels;
+      
+      // Secondary sort: entry points first
       const aIsEntry = entryPoints.includes(a.id);
       const bIsEntry = entryPoints.includes(b.id);
       if (aIsEntry && !bIsEntry) return -1;
       if (!aIsEntry && bIsEntry) return 1;
-      return 0;
+      
+      // Tertiary sort by name for consistency
+      return a.name.localeCompare(b.name);
     });
     
-    // Position nodes vertically within their lane
-    const nodeSpacing = Math.min(80, height / (nodesInLane.length + 1));
-    const startY = (height - (nodesInLane.length - 1) * nodeSpacing) / 2;
+    // DYNAMIC MULTI-COLUMN LAYOUT FOR LARGE DATASETS
+    const nodesPerColumn = Math.min(LAYOUT_CONFIG.MAX_NODES_PER_COLUMN, sortedNodes.length);
+    const numberOfColumns = Math.min(
+      Math.ceil(sortedNodes.length / nodesPerColumn), 
+      LAYOUT_CONFIG.MAX_COLUMNS_PER_LAYER
+    );
     
-    nodesInLane.forEach((node, index) => {
+    // Calculate actual layer width based on number of columns needed
+    const dynamicWidth = Math.max(
+      LAYOUT_CONFIG.MIN_COLUMN_WIDTH,
+      LAYOUT_CONFIG.BASE_LAYER_WIDTH / Math.max(1, 15 / sortedNodes.length)
+    );
+    const actualLayerWidth = Math.max(
+      LAYOUT_CONFIG.BASE_LAYER_WIDTH,
+      numberOfColumns * dynamicWidth
+    );
+    
+    const columnWidth = actualLayerWidth / numberOfColumns;
+    
+    sortedNodes.forEach((node, nodeIndex) => {
+      const columnIndex = Math.floor(nodeIndex / nodesPerColumn);
+      const positionInColumn = nodeIndex % nodesPerColumn;
+      
+      // Calculate X position (column-based)
+      const x = currentLayerStartX + (columnIndex * columnWidth) + (columnWidth / 2);
+      
+      // Calculate Y position with proper spacing
+      const availableHeight = height - LAYOUT_CONFIG.HEADER_HEIGHT - LAYOUT_CONFIG.BOTTOM_PADDING;
+      const effectiveNodesInColumn = Math.min(nodesPerColumn, sortedNodes.length - (columnIndex * nodesPerColumn));
+      
+      let y: number;
+      if (effectiveNodesInColumn === 1) {
+        // Single node - center it in available space below header
+        y = LAYOUT_CONFIG.HEADER_HEIGHT + (availableHeight / 2);
+      } else {
+        // Multiple nodes - distribute evenly with minimum spacing
+        const maxSpacing = availableHeight / (effectiveNodesInColumn - 1);
+        const actualSpacing = Math.max(LAYOUT_CONFIG.MIN_NODE_SPACING, maxSpacing);
+        const totalUsedHeight = (effectiveNodesInColumn - 1) * actualSpacing;
+        const startY = LAYOUT_CONFIG.HEADER_HEIGHT + ((availableHeight - totalUsedHeight) / 2);
+        y = startY + (positionInColumn * actualSpacing);
+      }
+      
+      // Get color based on folder
+      const folderColor = getNodeColorByFolder(folder);
+      
       positions.push({
         node,
-        x: laneX,
-        y: startY + index * nodeSpacing,
-        layer: laneIndex,
-        column: index,
+        x,
+        y,
+        layer: folderIndex,
+        column: nodeIndex,
         isEntryPoint: entryPoints.includes(node.id),
-        radius: getNodeRadius(node.type),
-        color: NODE_COLORS[node.type] || '#6B7280',
-        icon: NODE_ICONS[node.type] || '?'
+        radius: 16,
+        color: folderColor,
+        icon: ''
       });
     });
+    
+    // Update layer start position for next layer
+    currentLayerStartX += actualLayerWidth + LAYOUT_CONFIG.LAYER_PADDING;
+  });
+  
+  console.log('📊 Layout Summary:');
+  sortedFolders.forEach((folder, index) => {
+    const nodes = nodesByFolder.get(folder) || [];
+    const avgDeps = folderAverageRelationships.get(folder) || 0;
+    console.log(`  ${index + 1}. ${folder}: ${nodes.length} nodes, ${avgDeps.toFixed(1)} avg dependencies`);
   });
   
   return positions;
@@ -349,41 +485,56 @@ const calculateMetrics = (
 const generateNodeInstructions = (positions: NodePosition[]): RenderInstruction[] => {
   return positions.map(pos => ({
     type: 'group' as const,
-    className: 'node',
+    className: `node node-${pos.node.type}`,
     transform: `translate(${pos.x},${pos.y})`,
     children: [
+      // Outer ring for entry points
+      pos.isEntryPoint ? {
+        type: 'circle' as const,
+        cx: 0,
+        cy: 0,
+        r: pos.radius + 3,
+        fill: 'none',
+        stroke: pos.color,
+        strokeWidth: 2,
+        opacity: 0.3,
+        className: 'entry-point-ring'
+      } : null,
+      // Main node circle
       {
         type: 'circle' as const,
         cx: 0,
         cy: 0,
         r: pos.radius,
-        fill: pos.isEntryPoint ? pos.color : lightenColor(pos.color, 0.1),
-        stroke: pos.color,
-        strokeWidth: pos.isEntryPoint ? 3 : 2,
-        className: `node-circle node-${pos.node.type}`
-      },
-      {
-        type: 'text' as const,
-        text: pos.icon,
-        x: 0,
-        y: 0,
-        fontSize: 10,
         fill: '#ffffff',
-        textAnchor: 'middle',
-        fontWeight: 'bold',
-        dy: '0.35em'
+        stroke: pos.color,
+        strokeWidth: 2,
+        className: `node-circle`
       },
+      // Colored inner circle
+      {
+        type: 'circle' as const,
+        cx: 0,
+        cy: 0,
+        r: pos.radius - 6,
+        fill: pos.color,
+        stroke: 'none',
+        strokeWidth: 0,
+        opacity: 0.15,
+        className: 'node-inner'
+      },
+      // Node name label
       {
         type: 'text' as const,
-        text: truncateText(pos.node.name, 12),
+        text: truncateText(pos.node.name, 15),
         x: 0,
-        y: pos.radius + 12,
-        fontSize: 8,
-        fill: pos.color,
+        y: pos.radius + 14,
+        fontSize: 10,
+        fill: '#374151',
         textAnchor: 'middle',
-        fontWeight: '600'
+        fontWeight: '500'
       }
-    ]
+    ].filter(Boolean)
   }));
 };
 
@@ -399,6 +550,125 @@ const generateEdgeInstructions = (edges: EdgeData[]): RenderInstruction[] => {
     opacity: edge.isHighlighted ? 1 : 0.7,
     className: `edge edge-${edge.type}`
   }));
+};
+
+// Pure function to generate folder backgrounds
+const generateFolderBackgrounds = (
+  positions: NodePosition[],
+  width: number,
+  height: number
+): RenderInstruction[] => {
+  // Group positions by folder
+  const folderGroups = new Map<string, NodePosition[]>();
+  
+  positions.forEach(pos => {
+    const folder = pos.node.folder || 'root';
+    if (!folderGroups.has(folder)) {
+      folderGroups.set(folder, []);
+    }
+    folderGroups.get(folder)!.push(pos);
+  });
+  
+  // Sort folders by layer order (already sorted by relationship count)
+  const sortedFolders: string[] = [];
+  const layerToFolder = new Map<number, string>();
+  positions.forEach(pos => {
+    const folder = pos.node.folder || 'root';
+    if (!layerToFolder.has(pos.layer)) {
+      layerToFolder.set(pos.layer, folder);
+      sortedFolders.push(folder);
+    }
+  });
+  
+  // Use layout constants for consistent sizing
+  const containerTop = LAYOUT_CONFIG.HEADER_HEIGHT - 30;
+  const containerBottom = height - LAYOUT_CONFIG.BOTTOM_PADDING;
+  const containerHeight = containerBottom - containerTop;
+  const containerPadding = 30;
+  
+  return sortedFolders.map((folder, index) => {
+    const folderPositions = folderGroups.get(folder) || [];
+    if (folderPositions.length === 0) return null;
+    
+    // Calculate consistent container dimensions
+    const minX = Math.min(...folderPositions.map(p => p.x)) - containerPadding;
+    const maxX = Math.max(...folderPositions.map(p => p.x)) + containerPadding;
+    
+    // Use consistent height for all containers
+    const rectY = containerTop;
+    const rectHeight = containerHeight;
+    
+    // Get folder color
+    const folderColor = getNodeColorByFolder(folder);
+    
+    return {
+      type: 'group' as const,
+      className: 'folder-group',
+      children: [
+        // Background rectangle with consistent height
+        {
+          type: 'rect' as const,
+          x: minX,
+          y: rectY,
+          width: maxX - minX,
+          height: rectHeight,
+          fill: folderColor,
+          stroke: folderColor,
+          strokeWidth: 1,
+          rx: 8,
+          opacity: 0.05
+        },
+        // Border for definition
+        {
+          type: 'rect' as const,
+          x: minX,
+          y: rectY,
+          width: maxX - minX,
+          height: rectHeight,
+          fill: 'none',
+          stroke: folderColor,
+          strokeWidth: 1,
+          rx: 8,
+          opacity: 0.2
+        },
+        // Top accent bar
+        {
+          type: 'rect' as const,
+          x: minX,
+          y: rectY,
+          width: maxX - minX,
+          height: 3,
+          fill: folderColor,
+          stroke: 'none',
+          strokeWidth: 0,
+          rx: 0,
+          opacity: 0.4
+        },
+        // Folder label
+        {
+          type: 'text' as const,
+          text: folder.toUpperCase(),
+          x: (minX + maxX) / 2,
+          y: rectY + 25,
+          fontSize: 11,
+          fill: folderColor,
+          textAnchor: 'middle',
+          fontWeight: 'bold'
+        },
+        // Node count label
+        {
+          type: 'text' as const,
+          text: `${folderPositions.length} function${folderPositions.length !== 1 ? 's' : ''}`,
+          x: (minX + maxX) / 2,
+          y: rectY + 40,
+          fontSize: 9,
+          fill: '#9CA3AF',
+          textAnchor: 'middle',
+          fontWeight: 'normal'
+        }
+      ]
+    };
+  }).filter(Boolean) as RenderInstruction[];
 };
 
 // Pure function to generate marker definitions
@@ -468,6 +738,9 @@ export const renderRailway = (
     data.railway.entryPoints
   );
   
+  // Generate folder backgrounds
+  const folderBackgrounds = generateFolderBackgrounds(nodePositions, config.width, config.height);
+  
   // Generate render instructions
   const instructions: RenderInstruction[] = [
     {
@@ -475,6 +748,11 @@ export const renderRailway = (
       tag: 'defs',
       attributes: {},
       children: generateMarkerDefinitions()
+    },
+    {
+      type: 'group',
+      className: 'folder-backgrounds',
+      children: folderBackgrounds
     },
     {
       type: 'group',
@@ -501,14 +779,147 @@ export const renderRailway = (
   
   // Define event handlers (pure functions that return new state)
   const handlers: EventHandlers = {
-    onNodeClick: (_node: EffectNode) => {
-      // Return action to handle node click
+    onNodeClick: (node: EffectNode) => {
+      console.log('Node clicked:', node);
+      
+      // Show the code inspection panel
+      const panel = document.getElementById('code-inspection-panel');
+      if (panel) {
+        panel.classList.add('visible');
+      }
+      
+      // Update node information
+      const nodeInfo = document.getElementById('node-info');
+      if (nodeInfo) {
+        nodeInfo.innerHTML = `
+          <strong>${node.name}</strong><br>
+          <span style="color: #666;">Type:</span> ${node.type}<br>
+          <span style="color: #666;">File:</span> ${node.filePath}:${node.line}<br>
+          <span style="color: #666;">Folder:</span> ${node.folder || 'root'}<br>
+          ${node.description ? `<div style="margin-top: 0.5rem; font-size: 0.85rem; color: #555;">${node.description}</div>` : ''}
+        `;
+      }
+      
+      // Update effect signature if available
+      const effectSignature = document.getElementById('effect-signature');
+      if (effectSignature && node.effectSignature) {
+        const sig = node.effectSignature;
+        effectSignature.innerHTML = `
+          <div class="code-block">
+Effect&lt;${sig.success || 'unknown'}, ${(sig.error || []).join(' | ') || 'never'}, ${(sig.dependencies || []).join(' & ') || 'never'}&gt;
+          </div>
+        `;
+      } else if (effectSignature) {
+        effectSignature.innerHTML = `<div style="color: #666; font-style: italic;">No Effect signature available</div>`;
+      }
+      
+      // Calculate and display dependencies
+      const upstreamNodes: EffectNode[] = [];
+      const downstreamNodes: EffectNode[] = [];
+      
+      console.log('Total edges in data:', data.railway.edges.length);
+      console.log('Current node ID:', node.id);
+      console.log('Sample edges:', data.railway.edges.slice(0, 5));
+      
+      // Find upstream dependencies (nodes that this node depends on)
+      data.railway.edges.forEach(edge => {
+        if (edge.target === node.id) {
+          const sourceNode = data.railway.nodes.find(n => n.id === edge.source);
+          if (sourceNode) {
+            upstreamNodes.push(sourceNode);
+          }
+        }
+      });
+      
+      // Find downstream dependents (nodes that depend on this node)
+      data.railway.edges.forEach(edge => {
+        if (edge.source === node.id) {
+          const targetNode = data.railway.nodes.find(n => n.id === edge.target);
+          if (targetNode) {
+            downstreamNodes.push(targetNode);
+          }
+        }
+      });
+      
+      console.log('Found upstream nodes:', upstreamNodes.length);
+      console.log('Found downstream nodes:', downstreamNodes.length);
+      console.log('Upstream nodes:', upstreamNodes);
+      console.log('Downstream nodes:', downstreamNodes);
+      
+      // Update upstream dependencies
+      const upstreamDeps = document.getElementById('upstream-deps');
+      if (upstreamDeps) {
+        upstreamDeps.innerHTML = '';
+        if (upstreamNodes.length > 0) {
+          upstreamNodes.slice(0, 5).forEach((depNode: EffectNode) => {
+            const li = document.createElement('li');
+            li.className = 'upstream';
+            li.innerHTML = `
+              <strong>${depNode.name}</strong> (${depNode.type})<br>
+              <span style="font-size: 0.8rem; color: #666;">${depNode.filePath.split('/').pop()}:${depNode.line}</span>
+            `;
+            upstreamDeps.appendChild(li);
+          });
+          if (upstreamNodes.length > 5) {
+            const li = document.createElement('li');
+            li.className = 'upstream';
+            li.innerHTML = `<span style="color: #666; font-style: italic;">... and ${upstreamNodes.length - 5} more upstream dependencies</span>`;
+            upstreamDeps.appendChild(li);
+          }
+        } else {
+          upstreamDeps.innerHTML = '<li style="color: #666; font-style: italic;">No upstream dependencies</li>';
+        }
+      }
+      
+      // Update downstream dependents  
+      const downstreamDeps = document.getElementById('downstream-deps');
+      if (downstreamDeps) {
+        downstreamDeps.innerHTML = '';
+        if (downstreamNodes.length > 0) {
+          downstreamNodes.slice(0, 5).forEach((depNode: EffectNode) => {
+            const li = document.createElement('li');
+            li.className = 'downstream';
+            li.innerHTML = `
+              <strong>${depNode.name}</strong> (${depNode.type})<br>
+              <span style="font-size: 0.8rem; color: #666;">${depNode.filePath.split('/').pop()}:${depNode.line}</span>
+            `;
+            downstreamDeps.appendChild(li);
+          });
+          if (downstreamNodes.length > 5) {
+            const li = document.createElement('li');
+            li.className = 'downstream';
+            li.innerHTML = `<span style="color: #666; font-style: italic;">... and ${downstreamNodes.length - 5} more downstream dependents</span>`;
+            downstreamDeps.appendChild(li);
+          }
+        } else {
+          downstreamDeps.innerHTML = '<li style="color: #666; font-style: italic;">No downstream dependents</li>';
+        }
+      }
+      
+      // Update modification guide
+      const modificationGuide = document.getElementById('modification-steps');
+      if (modificationGuide) {
+        modificationGuide.innerHTML = `
+          <div class="guide-step">
+            <span class="step-number">1</span>
+            <strong>Impact Assessment:</strong> ${upstreamNodes.length} upstream dependencies, ${downstreamNodes.length} downstream dependents
+          </div>
+          <div class="guide-step">
+            <span class="step-number">2</span>
+            <strong>Risk Level:</strong> ${downstreamNodes.length > 3 ? 'HIGH' : downstreamNodes.length > 1 ? 'MEDIUM' : 'LOW'} - ${downstreamNodes.length > 3 ? 'Proceed with caution, comprehensive testing required' : downstreamNodes.length > 1 ? 'Standard precautions apply' : 'Low risk modification'}
+          </div>
+          <div class="guide-step">
+            <span class="step-number">3</span>
+            <strong>Function:</strong> <code>${node.name}</code> in <code>${node.filePath}:${node.line}</code>
+          </div>
+        `;
+      }
     },
     onNodeHover: (_node: EffectNode | null) => {
-      // Return action to handle node hover
+      // Tooltip handled by bridge
     },
     onZoom: (_scale: number, _x: number, _y: number) => {
-      // Return new zoom state
+      // Zoom handled by bridge
     }
   };
   

@@ -129,6 +129,9 @@ class EffectRailwayApp {
     
     // Update filter options based on actual data
     this.updateFilterOptions();
+    
+    // Update sidebar statistics and lists
+    this.updateSidebarStats();
   }
   
   private updateFilterOptions(): void {
@@ -149,6 +152,142 @@ class EffectRailwayApp {
       option.textContent = `${this.formatTypeName(type)} (${count})`;
       filterSelect.appendChild(option);
     });
+  }
+
+  private updateSidebarStats(): void {
+    if (!this.currentData) return;
+    
+    // Update basic statistics
+    const totalNodesEl = document.getElementById('total-nodes');
+    const totalEdgesEl = document.getElementById('total-edges');
+    
+    if (totalNodesEl) totalNodesEl.textContent = String(this.currentData.statistics.totalNodes || 0);
+    if (totalEdgesEl) totalEdgesEl.textContent = String(this.currentData.statistics.totalEdges || 0);
+    
+    // Group nodes by folder and type
+    const nodesByFolderAndType = new Map<string, Map<string, number>>();
+    const errorTypesByFolder = new Map<string, Set<string>>();
+    
+    this.currentData.railway.nodes.forEach(node => {
+      // Get folder from node
+      let folder = node.folder || 'root';
+      if (!node.folder && node.filePath) {
+        const pathParts = node.filePath.split('/').filter(p => p);
+        if (pathParts.length > 1) {
+          folder = pathParts.slice(0, Math.min(2, pathParts.length - 1)).join('/');
+        }
+      }
+      
+      // Track node types by folder
+      if (!nodesByFolderAndType.has(folder)) {
+        nodesByFolderAndType.set(folder, new Map<string, number>());
+      }
+      const folderTypes = nodesByFolderAndType.get(folder)!;
+      folderTypes.set(node.type, (folderTypes.get(node.type) || 0) + 1);
+      
+      // Track error types by folder
+      if (node.effectSignature?.error && node.effectSignature.error.length > 0) {
+        if (!errorTypesByFolder.has(folder)) {
+          errorTypesByFolder.set(folder, new Set<string>());
+        }
+        const folderErrors = errorTypesByFolder.get(folder)!;
+        node.effectSignature.error.forEach((error: string) => {
+          folderErrors.add(error);
+        });
+      }
+    });
+    
+    // Update Node Types list grouped by folder
+    const nodeTypesListEl = document.getElementById('node-types-list');
+    if (nodeTypesListEl) {
+      nodeTypesListEl.innerHTML = '';
+      
+      // Sort folders alphabetically
+      const sortedFolders = Array.from(nodesByFolderAndType.keys()).sort();
+      
+      sortedFolders.forEach(folder => {
+        const folderTypes = nodesByFolderAndType.get(folder)!;
+        
+        // Create folder group
+        const folderDiv = document.createElement('div');
+        folderDiv.style.marginBottom = '12px';
+        
+        const folderTitle = document.createElement('div');
+        folderTitle.style.fontWeight = 'bold';
+        folderTitle.style.color = '#3B82F6';
+        folderTitle.style.marginBottom = '4px';
+        folderTitle.textContent = `📁 ${folder}`;
+        folderDiv.appendChild(folderTitle);
+        
+        // Add types in this folder
+        const typesList = document.createElement('div');
+        typesList.style.paddingLeft = '12px';
+        typesList.style.fontSize = '0.9rem';
+        
+        const NODE_COLORS: Record<string, string> = {
+          controller: '#8B5CF6',
+          service: '#3B82F6',
+          repository: '#10B981',
+          middleware: '#F59E0B',
+          worker: '#EF4444',
+          utility: '#6B7280',
+          error: '#DC2626'
+        };
+        
+        Array.from(folderTypes.entries()).sort().forEach(([type, count]) => {
+          const typeItem = document.createElement('div');
+          typeItem.style.padding = '2px 0';
+          typeItem.innerHTML = `<span style="color: ${NODE_COLORS[type] || '#6B7280'}">●</span> ${type}: ${count}`;
+          typesList.appendChild(typeItem);
+        });
+        
+        folderDiv.appendChild(typesList);
+        nodeTypesListEl.appendChild(folderDiv);
+      });
+    }
+    
+    // Update Error Types list grouped by folder
+    const errorTypesListEl = document.getElementById('error-types-list');
+    if (errorTypesListEl) {
+      errorTypesListEl.innerHTML = '';
+      
+      if (errorTypesByFolder.size === 0) {
+        errorTypesListEl.innerHTML = '<div style="color: #999; font-style: italic;">No error types found</div>';
+      } else {
+        // Sort folders alphabetically
+        const sortedFolders = Array.from(errorTypesByFolder.keys()).sort();
+        
+        sortedFolders.forEach(folder => {
+          const folderErrors = errorTypesByFolder.get(folder)!;
+          
+          // Create folder group
+          const folderDiv = document.createElement('div');
+          folderDiv.style.marginBottom = '12px';
+          
+          const folderTitle = document.createElement('div');
+          folderTitle.style.fontWeight = 'bold';
+          folderTitle.style.color = '#EF4444';
+          folderTitle.style.marginBottom = '4px';
+          folderTitle.textContent = `📁 ${folder}`;
+          folderDiv.appendChild(folderTitle);
+          
+          // Add errors in this folder
+          const errorsList = document.createElement('div');
+          errorsList.style.paddingLeft = '12px';
+          errorsList.style.fontSize = '0.9rem';
+          
+          Array.from(folderErrors).sort().forEach(error => {
+            const errorItem = document.createElement('div');
+            errorItem.style.padding = '2px 0';
+            errorItem.innerHTML = `<span style="color: #DC2626">⚠</span> ${error}`;
+            errorsList.appendChild(errorItem);
+          });
+          
+          folderDiv.appendChild(errorsList);
+          errorTypesListEl.appendChild(folderDiv);
+        });
+      }
+    }
   }
   
   private formatTypeName(type: string): string {
@@ -250,7 +389,7 @@ class EffectRailwayApp {
       if (this.renderer && this.currentData) {
         // Recreate renderer with new dimensions
         const svgElement = document.getElementById('visualization') as SVGSVGElement;
-        this.renderer = new RailwayRenderer(svgElement);
+        this.renderer = new RailwayRendererBridge(svgElement);
         this.renderer.render(this.currentData);
       }
     });
@@ -300,41 +439,10 @@ class EffectRailwayApp {
     }
   }
 
-  private mapFolderToNodeType(folder: string): NodeType {
-    const folderLower = folder.toLowerCase();
-    
-    if (folderLower.includes('controller') || folderLower.includes('handler') || folderLower.includes('route')) {
-      return 'controller';
-    }
-    if (folderLower.includes('service') || folderLower.includes('business') || folderLower.includes('domain')) {
-      return 'service';
-    }
-    if (folderLower.includes('repository') || folderLower.includes('dao') || folderLower.includes('database') || folderLower.includes('db')) {
-      return 'repository';
-    }
-    if (folderLower.includes('middleware') || folderLower.includes('auth') || folderLower.includes('guard')) {
-      return 'middleware';
-    }
-    if (folderLower.includes('worker') || folderLower.includes('job') || folderLower.includes('queue')) {
-      return 'worker';
-    }
-    if (folderLower.includes('error') || folderLower.includes('exception')) {
-      return 'error';
-    }
-    if (folderLower.includes('util') || folderLower.includes('helper') || folderLower.includes('common')) {
-      return 'utility';
-    }
-    
-    // Default mapping based on common patterns
-    if (folderLower === 'models' || folderLower === 'entities') {
-      return 'repository';
-    }
-    if (folderLower === 'api' || folderLower === 'rest') {
-      return 'controller';
-    }
-    
-    // Default to service for unknown folders
-    return 'service';
+  private mapFolderToNodeType(folder: string): string {
+    // Use the folder name itself as the type
+    // This gives each folder its own unique type instead of trying to categorize
+    return folder;
   }
 
   private convertFunctionAnalysisToRailway(functionAnalysis: FunctionAnalysisResult): AnalysisResult {
@@ -729,8 +837,10 @@ class EffectRailwayApp {
   private setupExportFunctions(): void {
     if (!this.currentData) return;
 
-    const calculator = new EffectCalculator(this.currentData);
-    const targetedCalculator = new TargetedEffectCalculator(this.currentData);
+    // Skip calculator setup for now since these are causing import errors
+    // TODO: Fix these imports later
+    // const calculator = new EffectCalculator(this.currentData);
+    // const targetedCalculator = new TargetedEffectCalculator(this.currentData);
 
     // API Configuration
     const API_BASE_URL = 'http://localhost:3004/api';
@@ -869,31 +979,26 @@ class EffectRailwayApp {
       combinedAnalysis += `**Total Nodes:** ${this.currentData.railway.nodes.length}\n`;
       combinedAnalysis += `**Total Edges:** ${this.currentData.railway.edges.length}\n\n`;
 
-      // Add system overview first
+      // Add basic system overview
       combinedAnalysis += '---\n\n';
-      combinedAnalysis += treeGenerator.generateSystemOverview();
+      combinedAnalysis += '# 📊 SYSTEM OVERVIEW\n\n';
+      combinedAnalysis += `- Total Functions: ${this.currentData.statistics.totalNodes}\n`;
+      combinedAnalysis += `- Total Connections: ${this.currentData.statistics.totalEdges}\n`;
+      combinedAnalysis += `- Folders: ${Object.keys(this.currentData.statistics.nodesByFolder || {}).length}\n`;
       combinedAnalysis += '\n---\n\n';
 
-      // Add detailed analysis for each node
-      combinedAnalysis += '# 📊 DETAILED NODE ANALYSIS\n\n';
+      // Add basic node information for now
+      combinedAnalysis += '# 📊 NODE INFORMATION\n\n';
       
       this.currentData.railway.nodes.forEach((node, index) => {
-        try {
-          if (!this.currentData) return;
-          const analysis = generateNodeAnalysis(this.currentData, node.id);
-          combinedAnalysis += `## ${index + 1}. ${analysis.rootNode.name}\n\n`;
-          combinedAnalysis += analysis.fullDependencyTree;
-          combinedAnalysis += '\n---\n\n';
-          
-          if (analysis.impactAnalysis) {
-            combinedAnalysis += analysis.impactAnalysis;
-            combinedAnalysis += '\n---\n\n';
-          }
-        } catch (error) {
-          console.warn(`Failed to analyze node ${node.name}:`, error);
-          combinedAnalysis += `## ${index + 1}. ${node.name}\n\n`;
-          combinedAnalysis += `⚠️ Analysis failed for this node\n\n---\n\n`;
+        combinedAnalysis += `## ${index + 1}. ${node.name}\n\n`;
+        combinedAnalysis += `- **Type:** ${node.type}\n`;
+        combinedAnalysis += `- **File:** ${node.filePath}:${node.line}\n`;
+        combinedAnalysis += `- **Folder:** ${node.folder || 'root'}\n`;
+        if (node.description) {
+          combinedAnalysis += `- **Description:** ${node.description}\n`;
         }
+        combinedAnalysis += '\n---\n\n';
       });
 
       this.downloadText('complete_llm_analysis.md', combinedAnalysis);
